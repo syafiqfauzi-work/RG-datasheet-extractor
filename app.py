@@ -8,6 +8,7 @@ import csv
 import io
 import os
 from datetime import datetime
+from asi_rules import asi_from_extraction, render_asi, asi_csv_rows
 
 # --- 1. SETTING TAJUK WEB ---
 st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄")
@@ -351,6 +352,9 @@ if uploaded_file is not None or spec_file is not None:
             extracted_data.pop("Pitch_Calculation_Logic", None)
             extracted_data.pop("Height_Calculation_Logic", None)
             
+            # --- ASI DETERMINATION (guna nilai akhir selepas semua override) ---
+            asi_result = asi_from_extraction(extracted_data, designation_text, manufacturer_text)
+            
             st.success("Extraction Complete!")
             progress_bar.progress(100, text="Done!")
             time.sleep(0.5)
@@ -409,9 +413,14 @@ if uploaded_file is not None or spec_file is not None:
                     
                 return {"Specification": specs, "Extracted Value": values, "Unit": units, "Page": pages, "Source Evidence": evidences}
 
-            # --- 4 TABS UI ---
+            # --- 4 TABS UI (ASI result dipaparkan dalam tab Top) ---
             tab1, tab2, tab3, tab4 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter"])
-            with tab1: st.table(build_table(keys_top, extracted_data))
+            with tab1:
+                st.subheader("ASI Result")
+                render_asi(asi_result)
+                st.divider()
+                st.subheader("Temperature")
+                st.table(build_table(keys_top, extracted_data))
             with tab2: st.table(build_table(keys_library, extracted_data))
             with tab3: st.table(build_table(keys_processability, extracted_data))
             with tab4: st.table(build_table(keys_techn, extracted_data))
@@ -428,6 +437,10 @@ if uploaded_file is not None or spec_file is not None:
             
             for i in range(len(all_data["Specification"])):
                 writer.writerow([all_data["Specification"][i], all_data["Extracted Value"][i], all_data["Unit"][i], all_data["Page"][i], all_data["Source Evidence"][i]])
+            
+            # Tambah keputusan ASI di hujung CSV
+            for row in asi_csv_rows(asi_result):
+                writer.writerow(row)
             
             st.divider()
             st.download_button(
