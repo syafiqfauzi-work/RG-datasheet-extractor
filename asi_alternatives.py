@@ -183,13 +183,20 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
     )
     for n in res["notes"]:
         st.info(n)
-    if res["rows"]:
-        md = ("| # | Match | Manufacturer | Series | Suggested MPN | Package | Value / Tol | Expected ASI "
-              "| Differences | Verify |\n|---|---|---|---|---|---|---|---|---|---|\n")
+        if res["rows"]:
+        st.table({
+            "#": [str(i) for i in range(1, len(res["rows"]) + 1)],
+            "Match": [x["Match"] for x in res["rows"]],
+            "Manufacturer": [f"{x['Manufacturer']} ({x['Series']})" for x in res["rows"]],
+            "Suggested MPN": [x["MPN"] for x in res["rows"]],
+            "Package": [x["Package"] for x in res["rows"]],
+            "Value / Tol": [x["Value/Tol"] for x in res["rows"]],
+            "Expected ASI": [x["ASI"] for x in res["rows"]],
+            "Differences": [x["Differences"] for x in res["rows"]],
+        })
+        st.write("**Verify availability:**")
         for i, x in enumerate(res["rows"], 1):
-            md += (f"| {i} | {x['Match']} | {x['Manufacturer']} | {x['Series']} | `{x['MPN']}` | "
-                   f"{x['Package']} | {x['Value/Tol']} | {x['ASI']} | {x['Differences']} | {x['Verify']} |\n")
-        st.markdown(md)
+            st.markdown(f"{i}. {x['MPN']}: {x['Verify']}")
     for w in res["warnings"]:
         st.warning(w)
     st.caption("MPNs are generated from the manufacturers' part-number patterns, not looked up in a live "
