@@ -183,7 +183,7 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
     )
     for n in res["notes"]:
         st.info(n)
-        if res["rows"]:
+    if res["rows"]:
         st.table({
             "#": [str(i) for i in range(1, len(res["rows"]) + 1)],
             "Match": [x["Match"] for x in res["rows"]],
