@@ -9,6 +9,7 @@ import io
 import os
 from datetime import datetime
 from asi_rules import asi_from_extraction, render_asi, asi_csv_rows
+from asi_alternatives import render_alternatives
 
 # --- 1. SETTING TAJUK WEB ---
 st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄")
@@ -414,7 +415,7 @@ if uploaded_file is not None or spec_file is not None:
                 return {"Specification": specs, "Extracted Value": values, "Unit": units, "Page": pages, "Source Evidence": evidences}
 
             # --- 4 TABS UI (ASI result dipaparkan dalam tab Top) ---
-            tab1, tab2, tab3, tab4 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter"])
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter", "Alternative"])
             with tab1:
                 st.subheader("ASI Result")
                 render_asi(asi_result)
@@ -424,6 +425,7 @@ if uploaded_file is not None or spec_file is not None:
             with tab2: st.table(build_table(keys_library, extracted_data))
             with tab3: st.table(build_table(keys_processability, extracted_data))
             with tab4: st.table(build_table(keys_techn, extracted_data))
+            with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result)
             
             # --- JANA FAIL EXCEL (CSV) ---
             all_keys = keys_top + keys_library + keys_processability + keys_techn
