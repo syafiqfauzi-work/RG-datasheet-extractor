@@ -12,7 +12,19 @@ from asi_rules import asi_from_extraction, render_asi, asi_csv_rows
 from asi_alternatives import render_alternatives
 
 # --- 1. SETTING TAJUK WEB ---
-st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄")
+st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄", layout="wide")
+st.markdown("""
+<style>
+.block-container {padding-left: 2rem; padding-right: 2rem;}
+@media (max-width: 640px) {
+    .block-container {padding-left: 0.75rem; padding-right: 0.75rem;}
+}
+div[data-testid="stTable"] {overflow-x: auto;}
+div[data-testid="stTable"] td, div[data-testid="stTable"] th {
+    white-space: normal; word-break: break-word;
+}
+</style>
+""", unsafe_allow_html=True)
 st.title("📄 RG Datasheet Analyzer")
 st.write("Upload a datasheet (PDF) and the AI will extract the key specifications.")
 
@@ -417,11 +429,13 @@ if uploaded_file is not None or spec_file is not None:
             # --- 4 TABS UI (ASI result dipaparkan dalam tab Top) ---
             tab1, tab2, tab3, tab4, tab5 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter", "Alternative"])
             with tab1:
-                st.subheader("ASI Result")
-                render_asi(asi_result)
-                st.divider()
-                st.subheader("Temperature")
-                st.table(build_table(keys_top, extracted_data))
+                left, right = st.columns([3, 2])
+                with left:
+                    st.subheader("ASI Result")
+                    render_asi(asi_result)
+                with right:
+                    st.subheader("Temperature")
+                    st.table(build_table(keys_top, extracted_data))               
             with tab2: st.table(build_table(keys_library, extracted_data))
             with tab3: st.table(build_table(keys_processability, extracted_data))
             with tab4: st.table(build_table(keys_techn, extracted_data))
