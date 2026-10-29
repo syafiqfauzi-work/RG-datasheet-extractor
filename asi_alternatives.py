@@ -12,6 +12,7 @@ search links for verification.
 import math
 from urllib.parse import quote
 
+import dms_lookup as dms
 from asi_rules import (T, O, U, LABEL, E12_CLOSEST, E192_EXCLUSIVE, TOL_RULES,
                        _val, _num, _in, mantissa, parse_resistance,
                        parse_package, determine_asi)
@@ -86,14 +87,14 @@ def candidate_packages(pwr, orig_pkg):
     return fits[:2]
 
 
-def find_alternatives(resistance, tolerance, package, tc, mounting, tags, power, asi_result):
+def find_alternatives(resistance, tolerance, package, tc, mounting, tags, power, asi_result, dms_df=None):
     r = parse_resistance(resistance)
     tol = _num(tolerance)
     pkg0 = parse_package(package)
     tc0 = _num(tc)
     pwr = _num(power)
     tag_set = {t for t in str(tags or "").upper().replace("/", " ").split() if t}
-    out = {"rows": [], "notes": [], "warnings": []}
+    out = {"rows": [], "notes": [], "warnings": [], "spec": None}
 
     failing = [f"{c['Parameter']} ({c['Value']}): {c['Note']}"
                for c in asi_result["checks"] if c["Rating"] == U]
@@ -120,6 +121,9 @@ def find_alternatives(resistance, tolerance, package, tc, mounting, tags, power,
     pkgs = candidate_packages(pwr, pkg0)
     tc_chk = 200 if r_new < 10 else 100  # typical general-purpose chip TC (confirm on datasheet)
     was_tht = any(k in (mounting or "").upper() for k in ("THW", "THR", "THROUGH"))
+
+    out["spec"] = {"r": r_new, "tol": tol, "pkgs": pkgs, "pkg0": pkg0,
+                   "pwr": pwr, "tc0": tc0, "was_tht": was_tht}
 
     rows = []
     for pkg in pkgs:
@@ -151,6 +155,7 @@ def find_alternatives(resistance, tolerance, package, tc, mounting, tags, power,
                 "Manufacturer": short, "Series": series, "MPN": mpn, "Package": pkg,
                 "Value/Tol": f"{fmt_r(r_new)} / {tol_new:g}%", "ASI": res["label"],
                 "Differences": "; ".join(diffs) or "-", "Verify": search_links(mpn),
+                "InDMS": dms.mpn_status(dms_df, mpn),
             })
 
     rows.sort(key=lambda x: x["sort"])
@@ -164,11 +169,24 @@ def find_alternatives(resistance, tolerance, package, tc, mounting, tags, power,
 
 
 # --------------------------------------------------------- app integration
-def render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result):
+def render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result,
+                        dms_df=None, target_mpn=""):
     import streamlit as st
-    if asi_result["overall"] != U:
+
+    # the DMS ASI of an existing material number governs over the rule-based result
+    dms_bad = False
+    if dms_df is not None and str(target_mpn).strip():
+        exact, _ = dms.find_mpn(dms_df, target_mpn)
+        if len(exact):
+            b = exact.iloc[0]
+            if b["_asi"] in dms.AVOID_ASI:
+                dms_bad = True
+                st.warning(f"DMS lists {b['Material Number']} as ASI {b['_asi']}: {dms.ASI_MEANING[b['_asi']]}.")
+
+    if asi_result["overall"] != U and not dms_bad:
         st.info(f"Original part is {asi_result['label']}: alternatives are only suggested for ASI-U/V.")
         return
+
     parts = str(designation_text).split()
     tags = " ".join(parts[5:]) if len(parts) > 5 else ""
     res = find_alternatives(
@@ -180,10 +198,39 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
         tags=tags,
         power=_val(extracted_data, "Power Consumption (W)"),
         asi_result=asi_result,
+        dms_df=dms_df,
     )
     for n in res["notes"]:
         st.info(n)
+
+    # --- 1) parts that already exist in DMS (ASI T/O)
+    st.subheader("Already in DMS (ASI T/O)")
+    if dms_df is None:
+        st.caption("Upload the DMS export in the sidebar (🗄️ DMS Database) to see existing material numbers.")
+    elif res["spec"] is None:
+        st.caption("No replacement spec could be built, so DMS was not searched.")
+    else:
+        found = dms.find_better(dms_df, **res["spec"])
+        if found:
+            st.table({
+                "#": [str(i) for i in range(1, len(found) + 1)],
+                "Material Number": [x["Material Number"] for x in found],
+                "MPN": [x["MPN"] for x in found],
+                "Manufacturer": [x["Manufacturer"] for x in found],
+                "ASI": [x["ASI"] for x in found],
+                "Package": [x["Package"] for x in found],
+                "Value / Tol": [x["Value/Tol"] for x in found],
+                "Power (W)": [x["Power"] for x in found],
+                "TC (ppm)": [x["TC"] for x in found],
+                "Match": [x["Match"] for x in found],
+                "Differences": [x["Differences"] for x in found],
+            })
+        else:
+            st.info("No released ASI T/O part in DMS matches this value and an acceptable package.")
+
+    # --- 2) new part suggestions
     if res["rows"]:
+        st.subheader("New part suggestions")
         st.table({
             "#": [str(i) for i in range(1, len(res["rows"]) + 1)],
             "Match": [x["Match"] for x in res["rows"]],
@@ -192,6 +239,7 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
             "Package": [x["Package"] for x in res["rows"]],
             "Value / Tol": [x["Value/Tol"] for x in res["rows"]],
             "Expected ASI": [x["ASI"] for x in res["rows"]],
+            "In DMS?": [x["InDMS"] for x in res["rows"]],
             "Differences": [x["Differences"] for x in res["rows"]],
         })
         st.write("**Verify availability:**")
@@ -199,6 +247,6 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
             st.markdown(f"{i}. {x['MPN']}: {x['Verify']}")
     for w in res["warnings"]:
         st.warning(w)
-    st.caption("MPNs are generated from the manufacturers' part-number patterns, not looked up in a live "
-               "catalog. Open the DigiKey/Mouser/Octopart links to confirm the part exists, then confirm "
+    st.caption("New-part MPNs are generated from the manufacturers' part-number patterns, not looked up in a "
+               "live catalog. Open the DigiKey/Mouser/Octopart links to confirm the part exists, then confirm "
                "the ASI in DMS and with the component engineer.")
