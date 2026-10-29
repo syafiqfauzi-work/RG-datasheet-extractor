@@ -16,7 +16,7 @@ from dms_lookup import dms_sidebar, render_duplicate_check
 from ui_style import apply_style, render_summary
 
 # --- 1. SETTING TAJUK WEB ---
-st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄", layout="wide")
+st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
 apply_style()
 st.markdown("""
 <style>
@@ -88,11 +88,10 @@ with st.sidebar:
   
 dms_df = dms_sidebar()
 # --- 3 & 4. BUTANG RESET, INPUT MPN & UPLOAD ---
-c_mpn, c_reset = st.columns([5, 1])
+c_mpn, c_reset = st.columns([5, 1], vertical_alignment="bottom")
 with c_mpn:
     target_mpn = st.text_input("MPN (optional, recommended for catalogs)", key=f"mpn_{st.session_state.reset_key}")
 with c_reset:
-    st.write("")
     if st.button("Reset", use_container_width=True):
         st.session_state.reset_key += 1
         st.rerun()
@@ -104,10 +103,14 @@ with col1:
 with col2:
     spec_file = st.file_uploader("2. Upload Spec Sheet PDF (Optional - Priority)", type=["pdf"], key=f"spec_{st.session_state.reset_key}")
 
+c_btn, c_status = st.columns([1, 4], vertical_alignment="center")
+status_box = c_status.empty()
 if uploaded_file is not None or spec_file is not None:
-    if st.button("Extract Data", type="primary"):
+    with c_btn:
+        run_extract = st.button("Extract Data", type="primary", use_container_width=True)
+    if run_extract:
         progress_text = "Starting extraction process..."
-        progress_bar = st.progress(0, text=progress_text)
+        progress_bar = status_box.progress(0, text=progress_text)
         
         try:
             pdf_text = ""
@@ -424,11 +427,10 @@ if uploaded_file is not None or spec_file is not None:
             # --- ASI DETERMINATION (guna nilai akhir selepas semua override) ---
             asi_result = asi_from_extraction(extracted_data, designation_text, manufacturer_text)
             
-            st.success("Extraction Complete!")
             progress_bar.progress(100, text="Done!")
             time.sleep(0.5)
-            progress_bar.empty() # Hilangkan bar selepas selesai
-            
+            status_box.caption("✅ Extraction complete")
+                        
             # Simpan History
             rekod_mpn = target_mpn.upper() if target_mpn else "General (No MPN)"
             if rekod_mpn not in st.session_state.history:
