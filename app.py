@@ -129,7 +129,7 @@ if uploaded_file is not None or spec_file is not None:
             "Kind of Mounting", "Washability", "Varnishability", "St. Solder (Standard Solder)", 
             "Alt. Solder (Alternate Solder)", "Rep. Solder (Repair Solder)", "ESS Suitable", 
             "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)",
-            "Manufacturer", "Designation", "Additional Information", "Quantity"
+            "Manufacturer", "Designation", "Additional Information", "Quantity", "Commodity Group"
 
             Important Instructions:
             - Return strictly a valid JSON object with the keys above.
@@ -189,6 +189,7 @@ if uploaded_file is not None or spec_file is not None:
             - FOR "Manufacturer": Identify the manufacturer of the component from the datasheet. You MUST select strictly from this exact list: "Analog Devices, Inc.", "Barry Industries Inc.", "Bourns Inc.", "Caddock Electronics, Inc", "Diconex", "EMC TECHNIK & CONSULTING GmbH", "Fenghua (H.K.) Electronics Ltd.", "IMS - International Manufacturing S", "Kyocera AVX Components Ltd.", "Mini-Circuits, Inc.", "Panasonic Corporation", "RES-NET Microwave, Inc.", "Smiths Interconnect", "Susumu Co., LTD", "TDK Corporation", "TTM Technologies Inc.", "Vishay Intertechnology, Inc.", or "Yageo Corporation". If the exact manufacturer is not in this list, return "Unknown".
             - FOR "Additional Information": Scan the datasheet for special qualifications. If the component is AEC-Q200 qualified or explicitly stated as Automotive Grade, you MUST extract and output "AQ". You may also list other special features here if found. If nothing is found, return "N/A".
             - FOR "Quantity": Determine the number of isolated resistor elements or circuits within the component package. For a standard single chip resistor, strictly return "1" for the value, and for the "evidence" field, you MUST output this exact fixed statement: "Standard single chip resistor". For resistor arrays or networks, return the exact number of elements (e.g., "2", "4") and quote the relevant array feature as evidence.
+            - FOR "Commodity Group": Select ONLY ONE code from this exact list: "RG" (resistor - fixed value: standard chip, thin film, thick film, metal film, carbon film, MELF, fixed wire-wound, jumpers / 0 Ohm, current sense), "RK" (resistor - PTC, NTC, varistor), "RN" (resistor - network: several resistor elements in one package, i.e. Quantity greater than 1), "RR" (resistor - adjustable wire resistor), "RS" (resistor - potentiometer, trimmer), "RT" (resistor - attenuator, termination), "RX" (resistor - unencapsulated chip, bare die), or "RZ" (accessory for resistors, e.g. heat sink, clip, mounting hardware). NEVER return RJ, RL, RV or RW (obsolete). A standard single fixed resistor is "RG". If the component does not clearly fit, return "Unknown".
             
             Datasheet Text:
             -----------------
@@ -256,6 +257,25 @@ if uploaded_file is not None or spec_file is not None:
             if isinstance(manufacturer_text, dict): 
                 manufacturer_text = manufacturer_text.get("value", "Unknown")
             # -----------------------------
+
+            # --- ASINGKAN COMMODITY GROUP ---
+            cg_options = {
+                "RG": "resistor - fixed value",
+                "RK": "resistor - PTC, NTC, varistor",
+                "RN": "resistor - network",
+                "RR": "resistor - adjustable wire resistor",
+                "RS": "resistor - potentiometer",
+                "RT": "resistor - attenuator, termination",
+                "RX": "resistor - unencapsulated chip",
+                "RZ": "accessory for resistors",
+            }
+            cg_raw = extracted_data.pop("Commodity Group", "Unknown")
+            if isinstance(cg_raw, dict):
+                cg_raw = cg_raw.get("value", "Unknown")
+            cg_code = str(cg_raw).strip().upper()[:2]
+            if cg_code not in cg_options:
+                cg_code = "Unknown"
+            cg_text = f"{cg_code} ({cg_options[cg_code]})" if cg_code in cg_options else "Unknown"
             
             # --- STANDARDIZE RESISTANCE (e.g., R300 -> 0R3) ---
             if "Resistance (Ohm)" in extracted_data and isinstance(extracted_data["Resistance (Ohm)"], dict):
@@ -380,6 +400,7 @@ if uploaded_file is not None or spec_file is not None:
             
             st.info(f"**Standardized Designation:** {designation_text}")
             st.caption(f"🏢 **Manufacturer:** {manufacturer_text}")
+            st.caption(f"🗂️ **Commodity Group:** {cg_text}")
             
             # --- DEFINISI KATEGORI ---
             keys_top = ["Operating Temperature (Max) (°C)", "Operating Temperature (Min) (°C)", "Storage Temperature (Max) (°C)", "Storage Temperature (Min) (°C)"]
