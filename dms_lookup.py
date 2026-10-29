@@ -108,6 +108,7 @@ def dms_sidebar():
     """Sidebar uploader. Returns the DMS dataframe, or None when nothing is loaded."""
     import streamlit as st
     with st.sidebar:
+        st.divider()
         st.header("🗄️ DMS Database")
         up = st.file_uploader("Upload DMS export (xlsx)", type=["xlsx"], key="dms_upload")
         data, src = None, None
@@ -274,6 +275,12 @@ def render_duplicate_check(df, target_mpn, extracted_data, designation_text, cg_
         st.table(_table_from_df(related, 8))
     else:
         st.info(f"{target_mpn.strip().upper()} is not in the DMS database.")
+
+    if cg_code not in ("RG", "Unknown"):
+        st.caption(f"Specification matching is available for RG only; the MPN lookup above covers {cg_code} parts too.")
+        with st.expander("ASI legend (PAD-M)"):
+            st.table({"ASI": [k or "(empty)" for k in ASI_MEANING], "Meaning": list(ASI_MEANING.values())})
+        return
 
     # 2) specification lookup
     st.subheader("2. Same value, tolerance and package")
