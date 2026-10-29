@@ -64,13 +64,16 @@ def _kv(label, value, color=None):
     return f'<div class="kv"><span>{html.escape(label)}</span><b{style}>{html.escape(str(value))}</b></div>'
 
 
-def render_summary(designation_text, manufacturer_text, cg_text, asi_result, mpn=""):
+def render_summary(designation_text, manufacturer_text, cg_text, asi_result, mpn="", rule_applies=True):
     """Compact result header: copyable designation + four evenly spaced fields."""
     import streamlit as st
     st.markdown('<div class="kv" style="margin-bottom:-0.25rem"><span>Designation</span></div>',
                 unsafe_allow_html=True)
     st.code(str(designation_text), language=None)  # has a copy button
-    letter, meaning, color = ASI_TEXT.get(asi_result["overall"], ("-", "Undetermined", None))
+    if rule_applies:
+        letter, meaning, color = ASI_TEXT.get(asi_result["overall"], ("-", "Undetermined", None))
+    else:
+        letter, meaning, color = "N/A", "RG rules only", None
     cells = [
         _kv("ASI (rule)", f"{letter} · {meaning}", color),
         _kv("Commodity group", cg_text),
