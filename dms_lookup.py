@@ -108,7 +108,6 @@ def dms_sidebar():
     """Sidebar uploader. Returns the DMS dataframe, or None when nothing is loaded."""
     import streamlit as st
     with st.sidebar:
-        st.divider()
         st.header("🗄️ DMS Database")
         up = st.file_uploader("Upload DMS export (xlsx)", type=["xlsx"], key="dms_upload")
         data, src = None, None
