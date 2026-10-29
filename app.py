@@ -14,6 +14,7 @@ from asi_rules import asi_from_extraction, render_asi, asi_csv_rows
 from asi_alternatives import render_alternatives
 from dms_lookup import dms_sidebar, render_duplicate_check
 from ui_style import apply_style, render_summary
+from extract_rules import detect_manufacturer, detect_commodity_group, quantity_from
 
 # --- 1. SETTING TAJUK WEB ---
 st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
@@ -210,10 +211,10 @@ if uploaded_file is not None or spec_file is not None:
                 - "CU": Copper (Cu) contact surface
               * Note 4: For [Temperature coefficient], use ONLY the numeric value followed by "PPM". You MUST drop the "/K" or "/°C" completely. Example: use "50PPM", NEVER "50PPM/K" or "50PPM/°C".
               * Example output: 5R11 1% 200PPM 0.1W 0603 PP/AS
-            - FOR "Manufacturer": Identify the manufacturer of the component from the datasheet. You MUST select strictly from this exact list: "Analog Devices, Inc.", "Barry Industries Inc.", "Bourns Inc.", "Caddock Electronics, Inc", "Diconex", "EMC TECHNIK & CONSULTING GmbH", "Fenghua (H.K.) Electronics Ltd.", "IMS - International Manufacturing S", "Kyocera AVX Components Ltd.", "Mini-Circuits, Inc.", "Panasonic Corporation", "RES-NET Microwave, Inc.", "Smiths Interconnect", "Susumu Co., LTD", "TDK Corporation", "TTM Technologies Inc.", "Vishay Intertechnology, Inc.", or "Yageo Corporation". If the exact manufacturer is not in this list, return "Unknown".
+            - FOR "Manufacturer": Identify the manufacturer of the component from the datasheet. You MUST select strictly from this exact list: "Analog Devices, Inc.", "Barry Industries Inc.", "Bourns Inc.", "Caddock Electronics, Inc", "Diconex", "EMC TECHNIK & CONSULTING GmbH", "Fenghua (H.K.) Electronics Ltd.", "IMS - International Manufacturing S", "Kyocera AVX Components Ltd.", "Littelfuse, Inc.", "Mini-Circuits, Inc.", "Panasonic Corporation", "RES-NET Microwave, Inc.", "Smiths Interconnect", "Susumu Co., LTD", "TDK Corporation", "TTM Technologies Inc.", "Vishay Intertechnology, Inc.", or "Yageo Corporation". If the exact manufacturer is not in this list, return "Unknown".
             - FOR "Additional Information": Scan the datasheet for special qualifications. If the component is AEC-Q200 qualified or explicitly stated as Automotive Grade, you MUST extract and output "AQ". You may also list other special features here if found. If nothing is found, return "N/A".
             - FOR "Quantity": Determine the number of isolated resistor elements or circuits within the component package. For a standard single chip resistor, strictly return "1" for the value, and for the "evidence" field, you MUST output this exact fixed statement: "Standard single chip resistor". For resistor arrays or networks, return the exact number of elements (e.g., "2", "4") and quote the relevant array feature as evidence.
-            - FOR "Commodity Group": Select ONLY ONE code from this exact list: "RG" (resistor - fixed value: standard chip, thin film, thick film, metal film, carbon film, MELF, fixed wire-wound, jumpers / 0 Ohm, current sense), "RK" (resistor - PTC, NTC, varistor), "RN" (resistor - network: several resistor elements in one package, i.e. Quantity greater than 1), "RR" (resistor - adjustable wire resistor), "RS" (resistor - potentiometer, trimmer), "RT" (resistor - attenuator, termination), "RX" (resistor - unencapsulated chip, bare die), or "RZ" (accessory for resistors, e.g. heat sink, clip, mounting hardware). NEVER return RJ, RL, RV or RW (obsolete). A standard single fixed resistor is "RG". If the component does not clearly fit, return "Unknown".
+            - FOR "Commodity Group": Select ONLY ONE code from this exact list: "RG" (resistor - fixed value: standard chip, thin film, thick film, metal film, carbon film, MELF, fixed wire-wound, jumpers / 0 Ohm, current sense), "RK" (resistor - PTC, NTC, varistor: includes PTC/NTC thermistors, polymeric PTC resettable fuses such as PolySwitch, and varistors), "RN" (resistor - network: several resistor elements in one package, i.e. Quantity greater than 1), "RR" (resistor - adjustable wire resistor), "RS" (resistor - potentiometer, trimmer), "RT" (resistor - attenuator, termination), "RX" (resistor - unencapsulated chip, bare die), or "RZ" (accessory for resistors, e.g. heat sink, clip, mounting hardware). NEVER return RJ, RL, RV or RW (obsolete). A standard single fixed resistor is "RG". If the component does not clearly fit, return "Unknown".
             
             Datasheet Text:
             -----------------
@@ -282,6 +283,9 @@ if uploaded_file is not None or spec_file is not None:
                 manufacturer_text = manufacturer_text.get("value", "Unknown")
             # -----------------------------
 
+                file_names = [f.name for f in (uploaded_file, spec_file) if f is not None]
+                manufacturer_text = detect_manufacturer(pdf_text, file_names) or manufacturer_text
+
             # --- ASINGKAN COMMODITY GROUP ---
             cg_options = {
                 "RG": "resistor - fixed value",
@@ -299,6 +303,8 @@ if uploaded_file is not None or spec_file is not None:
             cg_code = str(cg_raw).strip().upper()[:2]
             if cg_code not in cg_options:
                 cg_code = "Unknown"
+            cg_text = f"{cg_code} ({cg_options[cg_code]})" if cg_code in cg_options else "Unknown"
+            cg_code = detect_commodity_group(pdf_text, file_names, cg_code, quantity_from(extracted_data))
             cg_text = f"{cg_code} ({cg_options[cg_code]})" if cg_code in cg_options else "Unknown"
             
             # --- STANDARDIZE RESISTANCE (e.g., R300 -> 0R3) ---
@@ -419,7 +425,7 @@ if uploaded_file is not None or spec_file is not None:
             # Simpan History
             rekod_mpn = target_mpn.upper() if target_mpn else "General (No MPN)"
                        
-            render_summary(designation_text, manufacturer_text, cg_text, asi_result, target_mpn)
+            render_summary(designation_text, manufacturer_text, cg_text, asi_result, target_mpn, rule_applies=(cg_code in ("RG", "Unknown")))
             
             # --- DEFINISI KATEGORI ---
             keys_top = ["Operating Temperature (Max) (°C)", "Operating Temperature (Min) (°C)", "Storage Temperature (Max) (°C)", "Storage Temperature (Min) (°C)"]
