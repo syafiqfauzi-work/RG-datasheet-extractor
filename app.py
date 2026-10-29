@@ -7,7 +7,9 @@ import random
 import csv 
 import io
 import os
-from datetime import datetime
+import subprocess
+import urllib.request
+from datetime import datetime, timezone, timedelta
 from asi_rules import asi_from_extraction, render_asi, asi_csv_rows
 from asi_alternatives import render_alternatives
 from dms_lookup import dms_sidebar, render_duplicate_check
@@ -29,12 +31,39 @@ div[data-testid="stTable"] td, div[data-testid="stTable"] th {
 st.title("📄 RG Datasheet Analyzer")
 st.write("Upload a datasheet (PDF) and the AI will extract the key specifications.")
 
-# Baca metadata tarikh fail app.py ini terakhir disunting
-file_path = __file__
-modified_timestamp = os.path.getmtime(file_path)
-last_update_date = datetime.fromtimestamp(modified_timestamp).strftime("%d/%m/%Y")
+# --- TARIKH KEMASKINI KOD (dari commit GitHub terakhir) ---
+GITHUB_REPO = "syafiqfauzi-work/RG-datasheet-extractor"
 
-st.write(f"Analyzer last update on: {last_update_date}.")
+@st.cache_data(ttl=600)
+def get_last_update():
+    sgt = timezone(timedelta(hours=8))
+    def fmt(iso):
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        return dt.astimezone(sgt).strftime("%d/%m/%Y %H:%M")
+    # 1) commit terakhir dari git clone (jika git tersedia)
+    try:
+        out = subprocess.run(["git", "log", "-1", "--format=%cI"], capture_output=True, text=True,
+                             timeout=5, cwd=os.path.dirname(os.path.abspath(__file__)))
+        if out.returncode == 0 and out.stdout.strip():
+            return fmt(out.stdout.strip())
+    except Exception:
+        pass
+    # 2) commit terakhir dari GitHub API (repo private: letak GITHUB_TOKEN dalam Streamlit Secrets)
+    try:
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "rg-datasheet-analyzer"}
+        try:
+            headers["Authorization"] = f"Bearer {st.secrets['GITHUB_TOKEN']}"
+        except Exception:
+            pass
+        req = urllib.request.Request(f"https://api.github.com/repos/{GITHUB_REPO}/commits?per_page=1", headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return fmt(json.loads(resp.read())[0]["commit"]["committer"]["date"])
+    except Exception:
+        pass
+    # 3) fallback: masa fail diubah
+    return datetime.fromtimestamp(os.path.getmtime(__file__), timezone(timedelta(hours=8))).strftime("%d/%m/%Y %H:%M")
+
+st.write(f"Analyzer last update on: {get_last_update()} (SGT).")
 
 # --- 2. INISIALISASI MEMORI (SESSION STATE) ---
 if "reset_key" not in st.session_state:
