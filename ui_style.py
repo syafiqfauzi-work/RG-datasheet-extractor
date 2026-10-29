@@ -3,10 +3,11 @@ import html
 
 CSS = """
 <style>
-/* --- chrome: hide menu/footer/toolbar, keep the sidebar toggle --- */
-#MainMenu, footer {visibility: hidden;}
+/* --- chrome: hide footer and Deploy button only (keeps the sidebar toggle and the
+       three-dot menu, which holds Settings > Theme for dark mode) --- */
+footer {visibility: hidden;}
 header[data-testid="stHeader"] {background: transparent;}
-div[data-testid="stToolbar"] {display: none;}
+[data-testid="stAppDeployButton"], .stDeployButton {display: none;}
 
 /* --- page width and spacing (works in landscape and portrait) --- */
 .block-container {padding: 2rem 2rem 3rem 2rem; max-width: 1400px;}
@@ -21,6 +22,7 @@ div[data-testid="stCaptionContainer"] {opacity: 0.7;}
 .stButton > button, .stDownloadButton > button {border-radius: 8px; font-weight: 500; padding: 0.3rem 1rem;}
 section[data-testid="stFileUploaderDropzone"] {padding: 0.6rem 0.8rem;}
 button[data-baseweb="tab"] {font-size: 0.9rem;}
+div[data-testid="stTabs"] {margin-top: 0.8rem;}
 div[data-testid="stAlert"] {border-radius: 8px; padding: 0.55rem 0.9rem; font-size: 0.9rem;}
 hr {margin: 0.8rem 0 !important;}
 
