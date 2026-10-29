@@ -21,14 +21,18 @@ MANUFACTURERS = {
     "Fenghua (H.K.) Electronics Ltd.": ["fenghua"],
     "IMS - International Manufacturing S": ["international manufacturing services"],
     "Kyocera AVX Components Ltd.": ["kyocera avx", "avx corporation", "kyocera"],
+    "Knowles Corporation": ["knowles"],
     "Littelfuse, Inc.": ["littelfuse"],
+    "MACOM": ["macom"],
+    "Marki Microwave": ["marki"],
     "Mini-Circuits, Inc.": ["mini-circuits", "minicircuits"],
     "Panasonic Corporation": ["panasonic"],
     "RES-NET Microwave, Inc.": ["res-net", "resnet microwave"],
     "Smiths Interconnect": ["smiths interconnect"],
-    "Susumu Co., LTD": ["susumu"],
+    "Spectrum Control (API Technologies)": ["spectrum control"],
+    "Susumu Co., LTD": ["susumu", "yds"],
     "TDK Corporation": ["tdk"],
-    "TTM Technologies Inc.": ["ttm technologies"],
+    "TTM Technologies Inc.": ["ttm technologies", "anaren"],
     "Vishay Intertechnology, Inc.": ["vishay"],
     "Yageo Corporation": ["yageo"],
 }
@@ -39,7 +43,7 @@ CG_PATTERNS = {
            "hold current", "trip current", "positive temperature coefficient",
            "negative temperature coefficient"],
     "RS": ["potentiometer", "trimmer", "wiper"],
-    "RT": ["attenuator"],
+    "RT": ["attenuator", "equalizer", "rf termination"],
 }
 
 
