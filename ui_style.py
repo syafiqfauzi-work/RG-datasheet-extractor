@@ -39,7 +39,14 @@ div[data-testid="stTable"] td {border: none; border-bottom: 1px solid rgba(128,1
 
 /* --- result summary --- */
 .kv span {display: block; font-size: 0.7rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.05em;}
-.kv b {font-size: 1.05rem; font-weight: 600;}
+.kv b {font-size: 1.05rem; font-weight: 600; display: block; overflow-wrap: anywhere;}
+.kv-grid {display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 0.1rem;}
+.kv-grid .kv {padding: 0 1rem; border-left: 1px solid rgba(128,128,128,0.25);}
+.kv-grid .kv:first-child {padding-left: 0; border-left: none;}
+@media (max-width: 640px) {
+    .kv-grid {grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 0.8rem;}
+    .kv-grid .kv:nth-child(3) {padding-left: 0; border-left: none;}
+}
 </style>
 """
 
@@ -58,17 +65,16 @@ def _kv(label, value, color=None):
 
 
 def render_summary(designation_text, manufacturer_text, cg_text, asi_result, mpn=""):
-    """Compact result header: copyable designation + ASI / group / manufacturer."""
+    """Compact result header: copyable designation + four evenly spaced fields."""
     import streamlit as st
-    st.markdown('<div class="kv" style="margin-bottom:-0.6rem"><span>Designation</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="kv" style="margin-bottom:-0.25rem"><span>Designation</span></div>',
+                unsafe_allow_html=True)
     st.code(str(designation_text), language=None)  # has a copy button
     letter, meaning, color = ASI_TEXT.get(asi_result["overall"], ("-", "Undetermined", None))
-    c1, c2, c3, c4 = st.columns([2, 3, 3, 3])
-    with c1:
-        st.markdown(_kv("ASI (rule)", f"{letter} · {meaning}", color), unsafe_allow_html=True)
-    with c2:
-        st.markdown(_kv("Commodity group", cg_text), unsafe_allow_html=True)
-    with c3:
-        st.markdown(_kv("Manufacturer", manufacturer_text), unsafe_allow_html=True)
-    with c4:
-        st.markdown(_kv("MPN", str(mpn).strip().upper() or "-"), unsafe_allow_html=True)
+    cells = [
+        _kv("ASI (rule)", f"{letter} · {meaning}", color),
+        _kv("Commodity group", cg_text),
+        _kv("Manufacturer", manufacturer_text),
+        _kv("MPN", str(mpn).strip().upper() or "-"),
+    ]
+    st.markdown('<div class="kv-grid">' + "".join(cells) + "</div>", unsafe_allow_html=True)
