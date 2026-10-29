@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 from asi_rules import asi_from_extraction, render_asi, asi_csv_rows
 from asi_alternatives import render_alternatives
+from dms_lookup import dms_sidebar, render_duplicate_check
 
 # --- 1. SETTING TAJUK WEB ---
 st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄", layout="wide")
@@ -54,6 +55,7 @@ with st.sidebar:
     else:
         st.info("No search record yet.")
   
+dms_df = dms_sidebar()
 # --- 3 & 4. BUTANG RESET, INPUT MPN & UPLOAD ---
 if st.button("🔄 Reset"):
     st.session_state.reset_key += 1
@@ -448,7 +450,7 @@ if uploaded_file is not None or spec_file is not None:
                 return {"Specification": specs, "Extracted Value": values, "Unit": units, "Page": pages, "Source Evidence": evidences}
 
             # --- 4 TABS UI (ASI result dipaparkan dalam tab Top) ---
-            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter", "Alternative"])
+            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter", "Alternative", "DMS Check"])
             with tab1:
                 if cg_code not in ("RG", "Unknown"):
                     st.warning(f"ASI rules cover Commodity Group RG only. This part is {cg_code}, so treat the ASI result with caution.")
@@ -462,7 +464,8 @@ if uploaded_file is not None or spec_file is not None:
             with tab2: st.table(build_table(keys_library, extracted_data))
             with tab3: st.table(build_table(keys_processability, extracted_data))
             with tab4: st.table(build_table(keys_techn, extracted_data))
-            with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result)
+            with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result, dms_df, target_mpn)
+            with tab6: render_duplicate_check(dms_df, target_mpn, extracted_data, designation_text, cg_code)
             
             # --- JANA FAIL EXCEL (CSV) ---
             all_keys = keys_top + keys_library + keys_processability + keys_techn
