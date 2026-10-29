@@ -13,9 +13,11 @@ from datetime import datetime, timezone, timedelta
 from asi_rules import asi_from_extraction, render_asi, asi_csv_rows
 from asi_alternatives import render_alternatives
 from dms_lookup import dms_sidebar, render_duplicate_check
+from ui_style import apply_style, render_summary
 
 # --- 1. SETTING TAJUK WEB ---
 st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄", layout="wide")
+apply_style()
 st.markdown("""
 <style>
 .block-container {padding-left: 2rem; padding-right: 2rem;}
@@ -28,8 +30,8 @@ div[data-testid="stTable"] td, div[data-testid="stTable"] th {
 }
 </style>
 """, unsafe_allow_html=True)
-st.title("📄 RG Datasheet Analyzer")
-st.write("Upload a datasheet (PDF) and the AI will extract the key specifications.")
+st.title("RG Datasheet Analyzer")
+st.caption("Upload a datasheet (PDF) and the AI will extract the key specifications.")
 
 # --- TARIKH KEMASKINI KOD (dari commit GitHub terakhir) ---
 GITHUB_REPO = "syafiqfauzi-work/RG-datasheet-extractor"
@@ -86,11 +88,14 @@ with st.sidebar:
   
 dms_df = dms_sidebar()
 # --- 3 & 4. BUTANG RESET, INPUT MPN & UPLOAD ---
-if st.button("🔄 Reset"):
-    st.session_state.reset_key += 1
-    st.rerun() 
-
-target_mpn = st.text_input("Enter specific MPN (Optional but recommended for catalogs):", key=f"mpn_{st.session_state.reset_key}")
+c_mpn, c_reset = st.columns([5, 1])
+with c_mpn:
+    target_mpn = st.text_input("MPN (optional, recommended for catalogs)", key=f"mpn_{st.session_state.reset_key}")
+with c_reset:
+    st.write("")
+    if st.button("Reset", use_container_width=True):
+        st.session_state.reset_key += 1
+        st.rerun()
 
 # --- UI DUAL UPLOAD ---
 col1, col2 = st.columns(2)
@@ -429,9 +434,7 @@ if uploaded_file is not None or spec_file is not None:
             if rekod_mpn not in st.session_state.history:
                 st.session_state.history.append(rekod_mpn)
             
-            st.info(f"**Standardized Designation:** {designation_text}")
-            st.caption(f"🏢 **Manufacturer:** {manufacturer_text}")
-            st.caption(f"🗂️ **Commodity Group:** {cg_text}")
+            render_summary(designation_text, manufacturer_text, cg_text, asi_result, target_mpn)
             
             # --- DEFINISI KATEGORI ---
             keys_top = ["Operating Temperature (Max) (°C)", "Operating Temperature (Min) (°C)", "Storage Temperature (Max) (°C)", "Storage Temperature (Min) (°C)"]
