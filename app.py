@@ -10,28 +10,18 @@ import os
 import subprocess
 import urllib.request
 from datetime import datetime, timezone, timedelta
-from asi_rules import asi_from_extraction, render_asi, asi_csv_rows
+from asi_rules import render_asi, asi_csv_rows
 from asi_alternatives import render_alternatives
 from dms_lookup import dms_sidebar, render_duplicate_check
 from ui_style import apply_style, render_summary
 from extract_rules import detect_manufacturer, detect_commodity_group, quantity_from
+from rules_registry import determine_asi_for_cg
+from rules_rt import rt_designation
 
 # --- 1. SETTING TAJUK WEB ---
-st.set_page_config(page_title="RG Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="R* Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
 apply_style()
-st.markdown("""
-<style>
-.block-container {padding-left: 2rem; padding-right: 2rem;}
-@media (max-width: 640px) {
-    .block-container {padding-left: 0.75rem; padding-right: 0.75rem;}
-}
-div[data-testid="stTable"] {overflow-x: auto;}
-div[data-testid="stTable"] td, div[data-testid="stTable"] th {
-    white-space: normal; word-break: break-word;
-}
-</style>
-""", unsafe_allow_html=True)
-st.title("RG Datasheet Analyzer")
+st.title("R* Datasheet Analyzer")
 st.caption("Upload a datasheet (PDF) and the AI will extract the key specifications.")
 
 # --- TARIKH KEMASKINI KOD (dari commit GitHub terakhir) ---
@@ -66,14 +56,16 @@ def get_last_update():
     # 3) fallback: masa fail diubah
     return datetime.fromtimestamp(os.path.getmtime(__file__), timezone(timedelta(hours=8))).strftime("%d/%m/%Y %H:%M")
 
-st.write(f"Analyzer last update on: {get_last_update()} (SGT).")
+st.caption(f"Analyzer last update on: {get_last_update()} (SGT).")
 
 # --- 2. INISIALISASI MEMORI (SESSION STATE) ---
 if "reset_key" not in st.session_state:
     st.session_state.reset_key = 0
 
+# --- SIDEBAR: DMS DATABASE ---
 dms_df = dms_sidebar()
-# --- 3 & 4. BUTANG RESET, INPUT MPN & UPLOAD ---
+
+# --- 3 & 4. INPUT MPN, RESET & UPLOAD ---
 c_mpn, c_reset = st.columns([5, 1], vertical_alignment="bottom")
 with c_mpn:
     target_mpn = st.text_input("MPN (optional, recommended for catalogs)", key=f"mpn_{st.session_state.reset_key}")
@@ -154,7 +146,8 @@ if uploaded_file is not None or spec_file is not None:
             "Kind of Mounting", "Washability", "Varnishability", "St. Solder (Standard Solder)", 
             "Alt. Solder (Alternate Solder)", "Rep. Solder (Repair Solder)", "ESS Suitable", 
             "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)",
-            "Manufacturer", "Designation", "Additional Information", "Quantity", "Commodity Group"
+            "Manufacturer", "Designation", "Additional Information", "Quantity", "Commodity Group",
+            "Attenuation (dB)", "Impedance (Ohm)", "Frequency Max (GHz)"
 
             Important Instructions:
             - Return strictly a valid JSON object with the keys above.
@@ -191,7 +184,7 @@ if uploaded_file is not None or spec_file is not None:
             - FOR VOLTAGE: If the datasheet lists multiple operation modes (e.g., "Standard" vs "Extended"), strictly extract the values for the "Standard" operation mode. Do not extract the Extended or maximum rating if a Standard mode is available.
               * Note 1: If Power is provided as a fraction (e.g., 1/20, 1/4, 1/8), you MUST calculate and return it strictly as a DECIMAL (e.g., 0.05, 0.25, 0.125) for both the "Power Consumption (W)" key and the "Designation" string.
               * Note 2: If the datasheet specifies a formula like "(P x R)1/2" instead of a direct number, calculate it mathematically using your final Power (W) and Resistance (Ohm) values. Round the final calculated value to exactly 4 decimal places (e.g., "0.5477") for the "value" field. In the "evidence" field, write your step-by-step calculation (e.g., "Formula: (P x R)^1/2 -> sqrt(1.0W x 0.3Ohm)").
-            - FOR "Pitch_Calculation_Logic": YOU MUST OUTPUT A MATRIX. 1) State nominal Length (L) in mm. 2) List ALL Terminal Widths (T) and their exact Resistance Ranges line-by-line (e.g., "Range 1: 0.001 to 0.0069, T = 1.47 | Range 2: 0.007 to 0.5, T = 0.508"). 3) State the target MPN resistance. 4) State exactly which range it falls into by comparing decimals. 5) Output the final formula AT THE VERY END in exactly this format: "Formula: L - T" (e.g., "Formula: 5.08 - 0.508").
+           - FOR "Pitch_Calculation_Logic": YOU MUST OUTPUT A MATRIX. 1) State nominal Length (L) in mm. 2) List ALL Terminal Widths (T) and their exact Resistance Ranges line-by-line (e.g., "Range 1: 0.001 to 0.0069, T = 1.47 | Range 2: 0.007 to 0.5, T = 0.508"). 3) State the target MPN resistance. 4) State exactly which range it falls into by comparing decimals. 5) Output the final formula AT THE VERY END in exactly this format: "Formula: L - T" (e.g., "Formula: 5.08 - 0.508").
             - FOR "Pitch (Footprint) (mm)": Output "N/A" for the "value" field. For the "evidence" field, extract ONLY the exact formula string generated at the very end of "Pitch_Calculation_Logic" (e.g., "5.08 - 0.508"). Discard the matrix text.
             - FOR THE "Designation" KEY: Construct a string following EXACTLY this format: 
               [Resistance] [Tolerance] [Temperature coefficient] [Power] [RAW Package EIA] [Additional Info]
@@ -211,10 +204,13 @@ if uploaded_file is not None or spec_file is not None:
                 - "CU": Copper (Cu) contact surface
               * Note 4: For [Temperature coefficient], use ONLY the numeric value followed by "PPM". You MUST drop the "/K" or "/°C" completely. Example: use "50PPM", NEVER "50PPM/K" or "50PPM/°C".
               * Example output: 5R11 1% 200PPM 0.1W 0603 PP/AS
-            - FOR "Manufacturer": Identify the manufacturer of the component from the datasheet. You MUST select strictly from this exact list: "Analog Devices, Inc.", "Barry Industries Inc.", "Bourns Inc.", "Caddock Electronics, Inc", "Diconex", "EMC TECHNIK & CONSULTING GmbH", "Fenghua (H.K.) Electronics Ltd.", "IMS - International Manufacturing S", "Kyocera AVX Components Ltd.", "Littelfuse, Inc.", "Mini-Circuits, Inc.", "Panasonic Corporation", "RES-NET Microwave, Inc.", "Smiths Interconnect", "Susumu Co., LTD", "TDK Corporation", "TTM Technologies Inc.", "Vishay Intertechnology, Inc.", or "Yageo Corporation". If the exact manufacturer is not in this list, return "Unknown".
+            - FOR "Manufacturer": Identify the manufacturer of the component from the datasheet. You MUST select strictly from this exact list: "Analog Devices, Inc.", "Barry Industries Inc.", "Bourns Inc.", "Caddock Electronics, Inc", "Diconex", "EMC TECHNIK & CONSULTING GmbH", "Fenghua (H.K.) Electronics Ltd.", "IMS - International Manufacturing S", "Knowles Corporation", "Kyocera AVX Components Ltd.", "Littelfuse, Inc.", "MACOM", "Marki Microwave", "Mini-Circuits, Inc.", "Panasonic Corporation", "RES-NET Microwave, Inc.", "Smiths Interconnect", "Spectrum Control (API Technologies)", "Susumu Co., LTD", "TDK Corporation", "TTM Technologies Inc.", "Vishay Intertechnology, Inc.", or "Yageo Corporation". If the exact manufacturer is not in this list, return "Unknown".
             - FOR "Additional Information": Scan the datasheet for special qualifications. If the component is AEC-Q200 qualified or explicitly stated as Automotive Grade, you MUST extract and output "AQ". You may also list other special features here if found. If nothing is found, return "N/A".
             - FOR "Quantity": Determine the number of isolated resistor elements or circuits within the component package. For a standard single chip resistor, strictly return "1" for the value, and for the "evidence" field, you MUST output this exact fixed statement: "Standard single chip resistor". For resistor arrays or networks, return the exact number of elements (e.g., "2", "4") and quote the relevant array feature as evidence.
-            - FOR "Commodity Group": Select ONLY ONE code from this exact list: "RG" (resistor - fixed value: standard chip, thin film, thick film, metal film, carbon film, MELF, fixed wire-wound, jumpers / 0 Ohm, current sense), "RK" (resistor - PTC, NTC, varistor: includes PTC/NTC thermistors, polymeric PTC resettable fuses such as PolySwitch, and varistors), "RN" (resistor - network: several resistor elements in one package, i.e. Quantity greater than 1), "RR" (resistor - adjustable wire resistor), "RS" (resistor - potentiometer, trimmer), "RT" (resistor - attenuator, termination), "RX" (resistor - unencapsulated chip, bare die), or "RZ" (accessory for resistors, e.g. heat sink, clip, mounting hardware). NEVER return RJ, RL, RV or RW (obsolete). A standard single fixed resistor is "RG". If the component does not clearly fit, return "Unknown".
+            - FOR "Commodity Group": Select ONLY ONE code from this exact list: "RG" (resistor - fixed value: standard chip, thin film, thick film, metal film, carbon film, MELF, fixed wire-wound, jumpers / 0 Ohm, current sense), "RK" (resistor - PTC, NTC, varistor: includes PTC/NTC thermistors, polymeric PTC resettable fuses such as PolySwitch, and varistors), "RN" (resistor - network: several resistor elements in one package, i.e. Quantity greater than 1), "RR" (resistor - adjustable wire resistor), "RS" (resistor - potentiometer, trimmer), "RT" (resistor - attenuator, termination: includes RF attenuators, terminations and RF equalizers), "RX" (resistor - unencapsulated chip, bare die), or "RZ" (accessory for resistors, e.g. heat sink, clip, mounting hardware). NEVER return RJ, RL, RV or RW (obsolete). A standard single fixed resistor is "RG". If the component does not clearly fit, return "Unknown".
+            - FOR "Attenuation (dB)": ONLY for attenuators and equalizers: the nominal attenuation in dB as a plain number (e.g., 6). For every other component return "N/A".
+            - FOR "Impedance (Ohm)": The characteristic or system impedance as a plain number (e.g., 50). Return "N/A" if it is not stated or not applicable.
+            - FOR "Frequency Max (GHz)": The maximum operating frequency in GHz as a plain number (e.g., 18). Return "N/A" if it is not stated or not applicable.
             
             Datasheet Text:
             -----------------
@@ -281,11 +277,11 @@ if uploaded_file is not None or spec_file is not None:
             manufacturer_text = extracted_data.pop("Manufacturer", "Unknown")
             if isinstance(manufacturer_text, dict): 
                 manufacturer_text = manufacturer_text.get("value", "Unknown")
+            # Penapis tegas: nama fail / kandungan PDF mengatasi jawapan AI jika bukti kuat
+            file_names = [f.name for f in (uploaded_file, spec_file) if f is not None]
+            manufacturer_text = detect_manufacturer(pdf_text, file_names) or manufacturer_text
             # -----------------------------
-
-                file_names = [f.name for f in (uploaded_file, spec_file) if f is not None]
-                manufacturer_text = detect_manufacturer(pdf_text, file_names) or manufacturer_text
-
+            
             # --- ASINGKAN COMMODITY GROUP ---
             cg_options = {
                 "RG": "resistor - fixed value",
@@ -303,9 +299,9 @@ if uploaded_file is not None or spec_file is not None:
             cg_code = str(cg_raw).strip().upper()[:2]
             if cg_code not in cg_options:
                 cg_code = "Unknown"
-            cg_text = f"{cg_code} ({cg_options[cg_code]})" if cg_code in cg_options else "Unknown"
             cg_code = detect_commodity_group(pdf_text, file_names, cg_code, quantity_from(extracted_data))
             cg_text = f"{cg_code} ({cg_options[cg_code]})" if cg_code in cg_options else "Unknown"
+            # --------------------------------
             
             # --- STANDARDIZE RESISTANCE (e.g., R300 -> 0R3) ---
             if "Resistance (Ohm)" in extracted_data and isinstance(extracted_data["Resistance (Ohm)"], dict):
@@ -415,23 +411,27 @@ if uploaded_file is not None or spec_file is not None:
             extracted_data.pop("Pitch_Calculation_Logic", None)
             extracted_data.pop("Height_Calculation_Logic", None)
             
-            # --- ASI DETERMINATION (guna nilai akhir selepas semua override) ---
-            asi_result = asi_from_extraction(extracted_data, designation_text, manufacturer_text)
+            # --- ASI DETERMINATION (peraturan ikut Commodity Group; guna nilai akhir selepas semua override) ---
+            asi_result = determine_asi_for_cg(cg_code, extracted_data, designation_text, manufacturer_text, pdf_text, file_names)
+            if cg_code == "RT" and asi_result.get("rt"):
+                designation_text = rt_designation(asi_result["rt"]) or designation_text
             
             progress_bar.progress(100, text="Done!")
             time.sleep(0.5)
             status_box.caption("✅ Extraction complete")
-                        
-            # Simpan History
+            
             rekod_mpn = target_mpn.upper() if target_mpn else "General (No MPN)"
-                       
-            render_summary(designation_text, manufacturer_text, cg_text, asi_result, target_mpn, rule_applies=(cg_code in ("RG", "Unknown")))
+            
+            render_summary(designation_text, manufacturer_text, cg_text, asi_result, target_mpn,
+                           rule_applies=(asi_result["label"] != "No rule"), na_text="No rule loaded")
             
             # --- DEFINISI KATEGORI ---
             keys_top = ["Operating Temperature (Max) (°C)", "Operating Temperature (Min) (°C)", "Storage Temperature (Max) (°C)", "Storage Temperature (Min) (°C)"]
             keys_library = ["Length (mm)", "Width (mm)", "Height (Max)", "Package Type (EIA)", "Pitch (Footprint) (mm)", "Number of Pins"]
             keys_processability = ["Kind of Mounting", "Washability", "Varnishability", "St. Solder (Standard Solder)", "Alt. Solder (Alternate Solder)", "Rep. Solder (Repair Solder)", "ESS Suitable", "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)"]
             keys_techn = ["Resistance (Ohm)", "Tolerance (%)", "Voltage (V)", "Package Type", "Quantity", "Function", "Power Consumption (W)", "Temperature Coefficient", "Height (mm)", "Additional Information"]
+            keys_techn_rt = ["Attenuation (dB)", "Impedance (Ohm)", "Frequency Max (GHz)", "Power Consumption (W)", "Package Type", "Quantity", "Height (mm)", "Additional Information"]
+            keys_techn_active = keys_techn_rt if cg_code == "RT" else keys_techn
 
             def build_table(keys_list, data_dict):
                 specs, values, units, evidences, pages = [], [], [], [], []
@@ -457,6 +457,8 @@ if uploaded_file is not None or spec_file is not None:
                     elif "(°C)" in key: key, unit_str = key.replace(" (°C)", ""), "°C"
                     elif "(mm)" in key: key, unit_str = key.replace(" (mm)", ""), "mm"
                     elif "(Ohm)" in key: key, unit_str = key.replace(" (Ohm)", ""), "Ohm"
+                    elif "(dB)" in key: key, unit_str = key.replace(" (dB)", ""), "dB"
+                    elif "(GHz)" in key: key, unit_str = key.replace(" (GHz)", ""), "GHz"
                     elif "(%)" in key: key, unit_str = key.replace(" (%)", ""), "%"
                     elif "(V)" in key: key, unit_str = key.replace(" (V)", ""), "V"
                     elif "(W)" in key: key, unit_str = key.replace(" (W)", ""), "W"
@@ -472,26 +474,26 @@ if uploaded_file is not None or spec_file is not None:
                     
                 return {"Specification": specs, "Extracted Value": values, "Unit": units, "Page": pages, "Source Evidence": evidences}
 
-            # --- 4 TABS UI (ASI result dipaparkan dalam tab Top) ---
+            # --- 6 TABS UI (keputusan ASI dipaparkan dalam tab Top) ---
             tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter", "Alternative", "DMS Check"])
             with tab1:
-                if cg_code not in ("RG", "Unknown"):
-                    st.warning(f"ASI rules cover Commodity Group RG only. This part is {cg_code}, so treat the ASI result with caution.")
+                if asi_result["label"] == "No rule":
+                    st.warning(f"No standardization rule is loaded for {cg_code} yet, so no ASI was determined.")
                 left, right = st.columns([3, 2])
                 with left:
                     st.subheader("ASI Result")
                     render_asi(asi_result)
                 with right:
                     st.subheader("Temperature")
-                    st.table(build_table(keys_top, extracted_data))               
+                    st.table(build_table(keys_top, extracted_data))
             with tab2: st.table(build_table(keys_library, extracted_data))
             with tab3: st.table(build_table(keys_processability, extracted_data))
-            with tab4: st.table(build_table(keys_techn, extracted_data))
-            with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result, dms_df, target_mpn)
+            with tab4: st.table(build_table(keys_techn_active, extracted_data))
+            with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result, dms_df, target_mpn, cg_code)
             with tab6: render_duplicate_check(dms_df, target_mpn, extracted_data, designation_text, cg_code)
             
             # --- JANA FAIL EXCEL (CSV) ---
-            all_keys = keys_top + keys_library + keys_processability + keys_techn
+            all_keys = keys_top + keys_library + keys_processability + keys_techn_active
             all_data = build_table(all_keys, extracted_data)
             
             csv_buffer = io.StringIO()
