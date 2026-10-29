@@ -321,12 +321,13 @@ def render_asi(result):
     msg = f"**{result['label']}**: {result['summary']}"
     {T: st.success, O: st.warning, U: st.error}.get(result["overall"], st.info)(msg)
     st.caption(f"Sub-group: {result['subgroup']}")
-    st.table({
-        "Parameter": [c["Parameter"] for c in result["checks"]],
-        "Value": [str(c["Value"]) for c in result["checks"]],
-        "Rating": [LABEL.get(c["Rating"], "info") for c in result["checks"]],
-        "Note": [c["Note"] for c in result["checks"]],
-    })
+    if result["checks"]:
+        st.table({
+            "Parameter": [c["Parameter"] for c in result["checks"]],
+            "Value": [str(c["Value"]) for c in result["checks"]],
+            "Rating": [LABEL.get(c["Rating"], "info") for c in result["checks"]],
+            "Note": [c["Note"] for c in result["checks"]],
+        })
     for f in result["flags"]:
         st.warning(f)
     st.caption("Rule-based on the RG standardization rule (18 Jul 2024). "
