@@ -20,7 +20,10 @@ div[data-testid="stCaptionContainer"] {opacity: 0.7;}
 
 /* --- controls --- */
 .stButton > button, .stDownloadButton > button {border-radius: 8px; font-weight: 500; padding: 0.3rem 1rem;}
-section[data-testid="stFileUploaderDropzone"] {padding: 0.6rem 0.8rem;}
+/* file uploader: centre the button / file chip vertically inside the box */
+[data-testid="stFileUploaderDropzone"] {display: flex; align-items: center !important;
+    padding: 0.9rem 1rem !important; min-height: 4.2rem;}
+[data-testid="stFileUploaderDropzone"] > * {margin-top: 0 !important; margin-bottom: 0 !important; align-self: center;}
 button[data-baseweb="tab"] {font-size: 0.9rem;}
 div[data-testid="stTabs"] {margin-top: 0.8rem;}
 div[data-testid="stAlert"] {border-radius: 8px; padding: 0.55rem 0.9rem; font-size: 0.9rem;}
@@ -57,6 +60,7 @@ def _kv(label, value, color=None):
 def render_summary(designation_text, manufacturer_text, cg_text, asi_result, mpn=""):
     """Compact result header: copyable designation + ASI / group / manufacturer."""
     import streamlit as st
+    st.markdown('<div class="kv" style="margin-bottom:-0.6rem"><span>Designation</span></div>', unsafe_allow_html=True)
     st.code(str(designation_text), language=None)  # has a copy button
     letter, meaning, color = ASI_TEXT.get(asi_result["overall"], ("-", "Undetermined", None))
     c1, c2, c3, c4 = st.columns([2, 3, 3, 3])
