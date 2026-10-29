@@ -70,22 +70,7 @@ st.write(f"Analyzer last update on: {get_last_update()} (SGT).")
 # --- 2. INISIALISASI MEMORI (SESSION STATE) ---
 if "reset_key" not in st.session_state:
     st.session_state.reset_key = 0
-if "history" not in st.session_state:
-    st.session_state.history = []
 
-# --- PAPARAN HISTORY DI SIDEBAR ---
-with st.sidebar:
-    st.header("🕰️ Extraction History")
-    if st.session_state.history:
-        for idx, item in enumerate(reversed(st.session_state.history)):
-            st.write(f"• {item}")
-        
-        if st.button("🗑️ Clear History"):
-            st.session_state.history = []
-            st.rerun() 
-    else:
-        st.info("No search record yet.")
-  
 dms_df = dms_sidebar()
 # --- 3 & 4. BUTANG RESET, INPUT MPN & UPLOAD ---
 c_mpn, c_reset = st.columns([5, 1], vertical_alignment="bottom")
@@ -433,9 +418,7 @@ if uploaded_file is not None or spec_file is not None:
                         
             # Simpan History
             rekod_mpn = target_mpn.upper() if target_mpn else "General (No MPN)"
-            if rekod_mpn not in st.session_state.history:
-                st.session_state.history.append(rekod_mpn)
-            
+                       
             render_summary(designation_text, manufacturer_text, cg_text, asi_result, target_mpn)
             
             # --- DEFINISI KATEGORI ---
