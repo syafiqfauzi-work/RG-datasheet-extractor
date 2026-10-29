@@ -170,8 +170,15 @@ def find_alternatives(resistance, tolerance, package, tc, mounting, tags, power,
 
 # --------------------------------------------------------- app integration
 def render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result,
-                        dms_df=None, target_mpn=""):
+                        dms_df=None, target_mpn="", cg_code="RG"):
     import streamlit as st
+    if cg_code == "RT":
+        from rules_rt import render_rt_alternatives
+        render_rt_alternatives(asi_result, dms_df)
+        return
+    if cg_code not in ("RG", "Unknown"):
+        st.info(f"Alternative suggestions are not available for {cg_code} yet (no standardization rule loaded).")
+        return
 
     # the DMS ASI of an existing material number governs over the rule-based result
     dms_bad = False
