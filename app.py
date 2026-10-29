@@ -450,6 +450,8 @@ if uploaded_file is not None or spec_file is not None:
             # --- 4 TABS UI (ASI result dipaparkan dalam tab Top) ---
             tab1, tab2, tab3, tab4, tab5 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter", "Alternative"])
             with tab1:
+                if cg_code not in ("RG", "Unknown"):
+                    st.warning(f"ASI rules cover Commodity Group RG only. This part is {cg_code}, so treat the ASI result with caution.")
                 left, right = st.columns([3, 2])
                 with left:
                     st.subheader("ASI Result")
