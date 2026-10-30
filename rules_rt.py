@@ -157,12 +157,13 @@ def asi_from_extraction_rt(extracted_data, manufacturer_text, pdf_text="", file_
 
 def render_rt_alternatives(asi_result, dms_df=None):
     import streamlit as st
+    from ui_style import callout
     spec = asi_result.get("rt")
     if not spec:
-        st.info("No RT specification available.")
+        callout("info", "No RT specification available.")
         return
     if asi_result["overall"] == T:
-        st.info("Original part already matches an ASI T standard catalog part.")
+        callout("success", "Original part already matches an ASI T standard catalog part.")
         return
     tech = spec["tech"]
 
