@@ -308,7 +308,7 @@ def render_results(job, category, raw, dms_df):
     extracted_data.pop("Height_Calculation_Logic", None)
             
     # --- WASHABILITY / VARNISHABILITY ikut PAD-M (kod huruf mengikut Commodity Group) ---
-    proc_warnings = apply_processability(extracted_data, cg_code)
+    proc_warnings = apply_processability(extracted_data, cg_code, mpn=target_mpn, designation=designation_text)
     
     # --- ASI DETERMINATION (peraturan ikut Commodity Group; guna nilai akhir selepas semua override) ---
     asi_result = determine_asi_for_cg(cg_code, extracted_data, designation_text, manufacturer_text, pdf_text, file_names, category)
@@ -326,7 +326,11 @@ def render_results(job, category, raw, dms_df):
     # --- DEFINISI KATEGORI ---
     keys_top = ["Operating Temperature (Max) (°C)", "Operating Temperature (Min) (°C)", "Storage Temperature (Max) (°C)", "Storage Temperature (Min) (°C)"]
     keys_library = ["Length (mm)", "Width (mm)", "Height (Max)", "Package Type (EIA)", "Pitch (Footprint) (mm)", "Number of Pins"]
-    keys_processability = ["Kind of Mounting", "Washability", "Varnishability", "St. Solder (Standard Solder)", "Alt. Solder (Alternate Solder)", "Rep. Solder (Repair Solder)", "ESS Suitable", "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)"]
+    keys_processability = ["Kind of Mounting", "Washability", "Varnishability",
+                           "St. Solder (Standard Solder)", "St. Solder Temp.", "Alt. Solder (Alternate Solder)", "Alt. Solder Temp.",
+                           "Rep. Solder (Repair Solder)", "Rep. Solder Temp.", "ESS Suitable",
+                           "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)",
+                           "Terminal Base", "Terminal Plating", "Recommended Reflow Profil", "Increased Reflow Profile", "ESD"]
     keys_techn_active = CATEGORIES[category]["techn"]
 
     def build_table(keys_list, data_dict):
