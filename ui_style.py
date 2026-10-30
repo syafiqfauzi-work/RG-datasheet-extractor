@@ -37,6 +37,24 @@ div[data-testid="stTable"] th {font-weight: 600; opacity: 0.7; background: trans
 div[data-testid="stTable"] td {border: none; border-bottom: 1px solid rgba(128,128,128,0.15);
     padding: 0.35rem 0.6rem; white-space: normal; word-break: break-word;}
 
+
+/* --- Reset button in red (the Extract button keeps the primary colour) --- */
+.st-key-reset_btn button {background-color: #dc2626; border-color: #dc2626; color: #ffffff;}
+.st-key-reset_btn button p {color: #ffffff;}
+.st-key-reset_btn button:hover {background-color: #b91c1c; border-color: #b91c1c; color: #ffffff;}
+.st-key-reset_btn button:focus, .st-key-reset_btn button:active {background-color: #991b1b; border-color: #991b1b; color: #ffffff; box-shadow: none;}
+
+/* --- label above the designation box: same look and spacing as a Streamlit widget label --- */
+.field-label {font-size: 0.875rem; line-height: 1.6; font-weight: 400; margin-bottom: -0.75rem;}
+
+/* --- status text beside the Category box: as tall as the box, text centred --- */
+.status-line {display: flex; align-items: center; height: 2.5rem; font-size: 0.875rem; opacity: 0.7;}
+
+/* --- last-update pill, top right --- */
+.update-wrap {text-align: right;}
+.update-pill {display: inline-block; padding: 0.25rem 0.75rem; border: 1px solid rgba(128,128,128,0.3);
+    border-radius: 999px; font-size: 0.75rem; opacity: 0.75; white-space: nowrap;}
+
 /* --- result summary --- */
 .kv span {display: block; font-size: 0.7rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.05em;}
 .kv b {font-size: 1.05rem; font-weight: 600; display: block; overflow-wrap: anywhere;}
@@ -67,8 +85,7 @@ def _kv(label, value, color=None):
 def render_summary(designation_text, manufacturer_text, cg_text, asi_result, mpn="", rule_applies=True, na_text="No rule loaded"):
     """Compact result header: copyable designation + four evenly spaced fields."""
     import streamlit as st
-    st.markdown('<div class="kv" style="margin-bottom:-0.25rem"><span>Designation</span></div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="field-label">Designation</div>', unsafe_allow_html=True)
     st.code(str(designation_text), language=None)  # has a copy button
     if rule_applies:
         letter, meaning, color = ASI_TEXT.get(asi_result["overall"], ("-", "Undetermined", None))
