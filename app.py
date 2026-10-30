@@ -8,6 +8,7 @@ import csv
 import io
 import os
 import copy
+import html
 import subprocess
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -25,8 +26,6 @@ from processability import apply_processability
 # --- 1. SETTING TAJUK WEB ---
 st.set_page_config(page_title="R* Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
 apply_style()
-st.title("R* Datasheet Analyzer")
-st.caption("Upload a datasheet (PDF) and the AI will extract the key specifications.")
 
 # --- TARIKH KEMASKINI KOD (dari commit GitHub terakhir) ---
 GITHUB_REPO = "syafiqfauzi-work/RG-datasheet-extractor"
@@ -60,7 +59,14 @@ def get_last_update():
     # 3) fallback: masa fail diubah
     return datetime.fromtimestamp(os.path.getmtime(__file__), timezone(timedelta(hours=8))).strftime("%d/%m/%Y %H:%M")
 
-st.caption(f"Analyzer last update on: {get_last_update()} (SGT).")
+# --- TAJUK (kiri) + TARIKH KEMASKINI (kanan atas) ---
+c_title, c_upd = st.columns([5, 2], vertical_alignment="bottom")
+with c_title:
+    st.title("R* Datasheet Analyzer")
+    st.caption("Upload a datasheet (PDF) and the AI will extract the key specifications.")
+with c_upd:
+    st.markdown(f'<div class="update-wrap"><span class="update-pill">🕒 Last update: {get_last_update()} SGT</span></div>',
+                unsafe_allow_html=True)
 
 # --- PANGGILAN MODEL AI (dengan retry) ---
 def call_model(full_prompt, progress_bar):
@@ -436,7 +442,7 @@ c_mpn, c_reset = st.columns([5, 1], vertical_alignment="bottom")
 with c_mpn:
     target_mpn = st.text_input("MPN (optional, recommended for catalogs)", key=f"mpn_{st.session_state.reset_key}")
 with c_reset:
-    if st.button("Reset", use_container_width=True):
+    if st.button("Reset", key="reset_btn", use_container_width=True):
         st.session_state.reset_key += 1
         st.session_state.pop("job", None)
         st.session_state.pop("cat_choice", None)
@@ -501,10 +507,10 @@ if job:
     with c_cat:
         chosen = st.selectbox("Category", list(CATEGORIES), key="cat_choice")
     with c_note:
-        if chosen == job["auto_cat"]:
-            st.caption(f"✅ Extraction complete · detected by AI: {job['auto_cat']}")
-        else:
-            st.caption(f"✏️ Manual choice · AI detected: {job['auto_cat']}")
+        ai = html.escape(job["auto_cat"])
+        text = (f"✅ Extraction complete · detected by AI: {ai}" if chosen == job["auto_cat"]
+                else f"✏️ Manual choice · AI detected: {ai}")
+        st.markdown(f'<div class="status-line">{text}</div>', unsafe_allow_html=True)
     
     # ekstrak untuk Category yang dipilih hanya sekali (hasil disimpan)
     if chosen not in job["raw"]:
