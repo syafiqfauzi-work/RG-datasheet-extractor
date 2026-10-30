@@ -15,6 +15,7 @@ import re
 
 import pandas as pd
 
+from ui_style import callout
 from asi_rules import _val, _num, _in, TOL_RULES, parse_resistance, parse_package
 
 LOCAL_PATH = "dms_database.xlsx"   # optional: only for a PRIVATE repo
@@ -243,7 +244,7 @@ def _table_from_df(m, limit=15):
 def render_duplicate_check(df, target_mpn, extracted_data, designation_text, cg_code):
     import streamlit as st
     if df is None:
-        st.info("Upload the DMS export in the sidebar (🗄️ DMS Database) to check whether this part already exists.")
+        callout("info", "Upload the DMS export in the sidebar (🗄️ DMS Database) to check whether this part already exists.")
         return
 
     r = parse_resistance(_val(extracted_data, "Resistance (Ohm)"))
@@ -260,21 +261,21 @@ def render_duplicate_check(df, target_mpn, extracted_data, designation_text, cg_
     elif len(exact):
         b = exact.iloc[0]
         asi, mat = b["_asi"], b["Material Number"]
-        msg = f"Already in DMS: **{mat}** · ASI {asi or '-'} · {ASI_MEANING[asi]}."
+        msg = f"**{mat}** · ASI {asi or '-'} · {ASI_MEANING[asi]}."
         if len(exact) > 1:
             msg += f" ({len(exact)} material numbers share this MPN; the best ASI is shown first.)"
         if asi in USABLE_ASI:
-            st.success(msg + " Reuse this material number instead of introducing a new one.")
+            callout("success", msg + " Reuse it instead of introducing a new material number.", tag="In DMS")
         elif asi == "M":
-            st.warning(msg)
+            callout("warning", msg, tag="In DMS")
         else:
-            st.error(msg + " Check the Alternative tab for a replacement.")
+            callout("error", msg + " Check the Alternative tab for a replacement.", tag="In DMS")
         st.table(_table_from_df(exact))
     elif len(related):
-        st.warning("No exact MPN match, but similar MPN(s) exist (same start of part number):")
+        callout("warning", "No exact match, but similar MPN(s) exist (same start of part number).", tag="Similar MPN")
         st.table(_table_from_df(related, 8))
     else:
-        st.info(f"{target_mpn.strip().upper()} is not in the DMS database.")
+        callout("info", f"{target_mpn.strip().upper()} is not in the DMS database.", tag="Not in DMS")
 
     if cg_code not in ("RG", "Unknown"):
         st.caption(f"Specification matching is available for RG only; the MPN lookup above covers {cg_code} parts too.")
@@ -285,7 +286,7 @@ def render_duplicate_check(df, target_mpn, extracted_data, designation_text, cg_
     # 2) specification lookup
     st.subheader("2. Same value, tolerance and package")
     if r is None:
-        st.warning("Resistance was not extracted, so the specification check cannot run.")
+        callout("warning", "Resistance was not extracted, so the specification check cannot run.")
     else:
         cg = cg_code if cg_code in ("RG", "RN", "RK", "RR", "RS", "RT", "RX", "RZ") else None
         spec = find_spec_matches(df, r, tol, pkg, was_tht, cg)
@@ -294,17 +295,17 @@ def render_duplicate_check(df, target_mpn, extracted_data, designation_text, cg_
         if len(spec):
             good = spec[spec["_asi"].isin(USABLE_ASI)]
             if len(good):
-                st.warning(f"Possible duplicate: {len(spec)} existing part(s) match {label}; "
-                           f"{len(good)} are ASI T/O. Consider reusing one before a new introduction.")
+                callout("warning", f"{len(spec)} existing part(s) match {label}; {len(good)} of them ASI T/O. "
+                                   f"Consider reusing one before a new introduction.", tag="Possible duplicate")
             else:
-                st.info(f"{len(spec)} existing part(s) match {label}, but none is ASI T/O.")
+                callout("info", f"{len(spec)} existing part(s) match {label}, but none is ASI T/O.", tag="Same spec")
             st.table(_table_from_df(spec))
             if len(spec) > 15:
                 st.caption(f"Showing the best 15 of {len(spec)}.")
             if was_tht:
                 st.caption("Through-hole parts are matched on value and tolerance only; body size can't be compared.")
         else:
-            st.success(f"No existing DMS part matches {label}: a new introduction would be needed.")
+            callout("success", f"No existing DMS part matches {label}: a new introduction would be needed.", tag="New part")
         n_missing = int(df["Resistance [Ohm]"].isna().sum())
         st.caption(f"{n_missing:,} DMS rows have no resistance value and cannot be matched by specification.")
 
