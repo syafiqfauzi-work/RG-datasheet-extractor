@@ -88,15 +88,31 @@ def rt_designation(spec):
     return f"RT {spec['att']:g}DB {spec['imp']:g}R{pw} SMD{spec['pkg'] or ''}".strip()
 
 
-def asi_from_extraction_rt(extracted_data, manufacturer_text, pdf_text="", file_names=()):
-    tech = detect_technology(pdf_text, file_names)
+def _first_num(extracted_data, keys):
+    for k in keys:
+        v = _num(_val(extracted_data, k))
+        if v is not None:
+            return v
+    return None
+
+
+def _fmax_ghz(extracted_data):
+    raw = _val(extracted_data, "f (Max) (Hz)")
+    try:
+        return float(re.sub(r"[^0-9eE+.\-]", "", raw)) / 1e9
+    except ValueError:
+        return _num(_val(extracted_data, "Frequency Max (GHz)"))
+
+
+def asi_from_extraction_rt(extracted_data, manufacturer_text, pdf_text="", file_names=(), category=None):
+    tech = "EQUALIZER" if category == "RF Equalizer" else detect_technology(pdf_text, file_names)
     spec = {
         "tech": tech,
-        "att": _num(_val(extracted_data, "Attenuation (dB)")),
-        "imp": _num(_val(extracted_data, "Impedance (Ohm)")),
-        "pwr": _num(_val(extracted_data, "Power Consumption (W)")),
+        "att": _first_num(extracted_data, ["Attenuation (Fix / Max) (dB)", "Attenuation (Typ) (dB)", "Attenuation (dB)"]),
+        "imp": _first_num(extracted_data, ["Impedance (Ohm)"]),
+        "pwr": _first_num(extracted_data, ["Power Consumption (W)"]),
         "pkg": parse_package(_val(extracted_data, "Package Type")),
-        "fmax": _num(_val(extracted_data, "Frequency Max (GHz)")),
+        "fmax": _fmax_ghz(extracted_data),
     }
     checks, flags = [], []
 
