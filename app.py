@@ -20,6 +20,7 @@ from rules_registry import determine_asi_for_cg
 from rules_rt import rt_designation
 from categories import CATEGORIES, RESISTOR, detect_category
 from prompts import build_prompt
+from processability import apply_processability
 
 # --- 1. SETTING TAJUK WEB ---
 st.set_page_config(page_title="R* Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
@@ -306,6 +307,9 @@ def render_results(job, category, raw, dms_df):
     extracted_data.pop("Pitch_Calculation_Logic", None)
     extracted_data.pop("Height_Calculation_Logic", None)
             
+    # --- WASHABILITY / VARNISHABILITY ikut PAD-M (kod huruf mengikut Commodity Group) ---
+    proc_warnings = apply_processability(extracted_data, cg_code)
+    
     # --- ASI DETERMINATION (peraturan ikut Commodity Group; guna nilai akhir selepas semua override) ---
     asi_result = determine_asi_for_cg(cg_code, extracted_data, designation_text, manufacturer_text, pdf_text, file_names, category)
     if category == "RF Attenuator" and asi_result.get("rt"):
@@ -382,7 +386,10 @@ def render_results(job, category, raw, dms_df):
             st.subheader("Temperature")
             st.table(build_table(keys_top, extracted_data))
     with tab2: st.table(build_table(keys_library, extracted_data))
-    with tab3: st.table(build_table(keys_processability, extracted_data))
+    with tab3:
+        st.table(build_table(keys_processability, extracted_data))
+        for w in proc_warnings:
+            st.warning(w)
     with tab4: st.table(build_table(keys_techn_active, extracted_data))
     with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result, dms_df, target_mpn, cg_code)
     with tab6: render_duplicate_check(dms_df, target_mpn, extracted_data, designation_text, cg_code)
