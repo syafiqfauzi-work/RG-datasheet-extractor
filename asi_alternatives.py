@@ -13,6 +13,7 @@ import math
 from urllib.parse import quote
 
 import dms_lookup as dms
+from ui_style import callout
 from asi_rules import (T, O, U, LABEL, E12_CLOSEST, E192_EXCLUSIVE, TOL_RULES,
                        _val, _num, _in, mantissa, parse_resistance,
                        parse_package, determine_asi)
@@ -177,7 +178,7 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
         render_rt_alternatives(asi_result, dms_df)
         return
     if cg_code not in ("RG", "Unknown"):
-        st.info(f"Alternative suggestions are not available for {cg_code} yet (no standardization rule loaded).")
+        callout("info", f"Alternative suggestions are not available for {cg_code} yet (no standardization rule loaded).")
         return
 
     # the DMS ASI of an existing material number governs over the rule-based result
@@ -188,10 +189,10 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
             b = exact.iloc[0]
             if b["_asi"] in dms.AVOID_ASI:
                 dms_bad = True
-                st.warning(f"DMS lists {b['Material Number']} as ASI {b['_asi']}: {dms.ASI_MEANING[b['_asi']]}.")
+                callout("warning", f"{b['Material Number']} is ASI {b['_asi']}: {dms.ASI_MEANING[b['_asi']]}.", tag="DMS")
 
     if asi_result["overall"] != U and not dms_bad:
-        st.info(f"Original part is {asi_result['label']}: alternatives are only suggested for ASI-U/V.")
+        callout("info", f"Original part is {asi_result['label']}: alternatives are only suggested for ASI-U/V.")
         return
 
     parts = str(designation_text).split()
@@ -208,7 +209,10 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
         dms_df=dms_df,
     )
     for n in res["notes"]:
-        st.info(n)
+        if n.startswith("Why ASI-U/V: "):
+            callout("info", n[len("Why ASI-U/V: "):], tag="Why ASI-U/V")
+        else:
+            callout("info", n)
 
     # --- 1) parts that already exist in DMS (ASI T/O)
     st.subheader("Already in DMS (ASI T/O)")
@@ -233,7 +237,7 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
                 "Differences": [x["Differences"] for x in found],
             })
         else:
-            st.info("No released ASI T/O part in DMS matches this value and an acceptable package.")
+            callout("info", "No released ASI T/O part in DMS matches this value and an acceptable package.")
 
     # --- 2) new part suggestions
     if res["rows"]:
@@ -253,7 +257,7 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
         for i, x in enumerate(res["rows"], 1):
             st.markdown(f"{i}. {x['MPN']}: {x['Verify']}")
     for w in res["warnings"]:
-        st.warning(w)
+        callout("warning", w)
     st.caption("New-part MPNs are generated from the manufacturers' part-number patterns, not looked up in a "
                "live catalog. Open the DigiKey/Mouser/Octopart links to confirm the part exists, then confirm "
                "the ASI in DMS and with the component engineer.")
