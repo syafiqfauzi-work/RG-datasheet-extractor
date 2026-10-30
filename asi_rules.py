@@ -318,8 +318,9 @@ def asi_csv_rows(result):
 
 def render_asi(result):
     import streamlit as st
-    msg = f"**{result['label']}**: {result['summary']}"
-    {T: st.success, O: st.warning, U: st.error}.get(result["overall"], st.info)(msg)
+    from ui_style import callout
+    kind = {T: "success", O: "warning", U: "error"}.get(result["overall"], "info")
+    callout(kind, result["summary"], tag=result["label"])
     st.caption(f"Sub-group: {result['subgroup']}")
     if result["checks"]:
         st.table({
@@ -329,6 +330,6 @@ def render_asi(result):
             "Note": [c["Note"] for c in result["checks"]],
         })
     for f in result["flags"]:
-        st.warning(f)
+        callout("warning", f)
     st.caption("Rule-based on the RG standardization rule (18 Jul 2024). "
                "Confirm the official status in DMS/PDM (ASI-Reason).")
