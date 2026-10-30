@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from asi_rules import render_asi, asi_csv_rows
 from asi_alternatives import render_alternatives
 from dms_lookup import dms_sidebar, render_duplicate_check
-from ui_style import apply_style, render_summary
+from ui_style import apply_style, render_summary, callout
 from extract_rules import detect_manufacturer, detect_commodity_group, quantity_from
 from rules_registry import determine_asi_for_cg
 from rules_rt import rt_designation
@@ -65,7 +65,7 @@ with c_title:
     st.title("R* Datasheet Analyzer")
     st.caption("Upload a datasheet (PDF) and the AI will extract the key specifications.")
 with c_upd:
-    st.markdown(f'<div class="update-wrap"><span class="update-pill">🕒 Last update: {get_last_update()} SGT</span></div>',
+    st.markdown(f'<p class="update-wrap"><span class="update-pill">🕒 Last update: {get_last_update()} SGT</span></p>',
                 unsafe_allow_html=True)
 
 # --- PANGGILAN MODEL AI (dengan retry) ---
@@ -386,8 +386,6 @@ def render_results(job, category, raw, dms_df):
     # --- 6 TABS UI (keputusan ASI dipaparkan dalam tab Top) ---
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter", "Alternative", "DMS Check"])
     with tab1:
-        if asi_result["label"] == "No rule":
-            st.warning(f"No standardization rule is loaded for {cg_code} yet, so no ASI was determined.")
         left, right = st.columns([3, 2])
         with left:
             st.subheader("ASI Result")
@@ -399,7 +397,7 @@ def render_results(job, category, raw, dms_df):
     with tab3:
         st.table(build_table(keys_processability, extracted_data))
         for w in proc_warnings:
-            st.warning(w)
+            callout("warning", w)
     with tab4: st.table(build_table(keys_techn_active, extracted_data))
     with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result, dms_df, target_mpn, cg_code)
     with tab6: render_duplicate_check(dms_df, target_mpn, extracted_data, designation_text, cg_code)
@@ -510,7 +508,7 @@ if job:
         ai = html.escape(job["auto_cat"])
         text = (f"✅ Extraction complete · detected by AI: {ai}" if chosen == job["auto_cat"]
                 else f"✏️ Manual choice · AI detected: {ai}")
-        st.markdown(f'<div class="status-line">{text}</div>', unsafe_allow_html=True)
+        st.markdown(f'<p class="status-line">{text}</p>', unsafe_allow_html=True)
     
     # ekstrak untuk Category yang dipilih hanya sekali (hasil disimpan)
     if chosen not in job["raw"]:
