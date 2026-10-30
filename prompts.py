@@ -18,7 +18,8 @@ RESISTOR_TEMPLATE = """            Act as an expert electronics engineer. {mpn_i
             "Kind of Mounting", "Washability", "Varnishability", "St. Solder (Standard Solder)", 
             "Alt. Solder (Alternate Solder)", "Rep. Solder (Repair Solder)", "ESS Suitable", 
             "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)",
-            "Manufacturer", "Designation", "Additional Information", "Quantity", "Commodity Group", "Category"
+            "Manufacturer", "Designation", "Additional Information", "Quantity", "Commodity Group", "Category",
+            "St. Solder Temp (°C)", "Alt. Solder Temp (°C)", "Rep. Solder Temp (°C)", "Solder Type", "Reflow Peak Temp (°C)", "Time Above Liquidus (s)", "Liquidus Temp (°C)", "ESD HBM (V)", "Terminal Base", "Terminal Plating"
 
             Important Instructions:
             - Return strictly a valid JSON object with the keys above.
@@ -81,6 +82,16 @@ RESISTOR_TEMPLATE = """            Act as an expert electronics engineer. {mpn_i
             - FOR "Commodity Group": Select ONLY ONE code from this exact list: "RG" (resistor - fixed value: standard chip, thin film, thick film, metal film, carbon film, MELF, fixed wire-wound, jumpers / 0 Ohm, current sense), "RK" (resistor - PTC, NTC, varistor: includes PTC/NTC thermistors, polymeric PTC resettable fuses such as PolySwitch, and varistors), "RN" (resistor - network: several resistor elements in one package, i.e. Quantity greater than 1), "RR" (resistor - adjustable wire resistor), "RS" (resistor - potentiometer, trimmer), "RT" (resistor - attenuator, termination: includes RF attenuators, terminations and RF equalizers), "RX" (resistor - unencapsulated chip, bare die), or "RZ" (accessory for resistors, e.g. heat sink, clip, mounting hardware). NEVER return RJ, RL, RV or RW (obsolete). A standard single fixed resistor is "RG". If the component does not clearly fit, return "Unknown".
             - FOR "Category": Select ONLY ONE DMS category from this exact list: "Resistor constant" (fixed resistors, networks, jumpers, chips), "Potentiometer mech. adjustable", "Potentiometer electr. adjustable" (digital potentiometers), "NTC PTC Varistor Sensors" (NTC/PTC thermistors, varistors), "Resettable Fuses" (PPTC, polyfuse, polyswitch), "RF Attenuator", "RF Termination" or "RF Equalizer". A standard fixed resistor is "Resistor constant".
             
+            [ADDITIONAL PROCESSABILITY RULES]
+            - FOR "St. Solder Temp (°C)", "Alt. Solder Temp (°C)" and "Rep. Solder Temp (°C)": For the soldering method chosen in "St. Solder (Standard Solder)", "Alt. Solder (Alternate Solder)" and "Rep. Solder (Repair Solder)", extract the MAXIMUM soldering temperature in °C that the datasheet allows for that method (reflow: peak temperature; wave: solder bath temperature; manual: soldering iron temperature) as a plain number (e.g., 260). Return "N/A" if the method is "no soldering" or the datasheet gives no temperature for it.
+            - FOR "Solder Type": Select ONLY ONE: "Lead-free" (Pb-free, SnAgCu soldering conditions), "Leaded" (SnPb soldering conditions) or "N/A" if the datasheet does not say. If both are given, return "Lead-free".
+            - FOR "Reflow Peak Temp (°C)": The maximum peak temperature (Tp) of the reflow profile that the component can withstand, as a plain number (e.g., 260). Return "N/A" if no reflow profile is given.
+            - FOR "Time Above Liquidus (s)": The maximum time above liquidus (tL) permitted in the reflow profile, in seconds as a plain number. For a range (e.g., 60-150 s) use the upper value. Return "N/A" if not stated.
+            - FOR "Liquidus Temp (°C)": The liquidus temperature TL that "Time Above Liquidus (s)" refers to (e.g., 217 or 183), as a plain number. Return "N/A" if not stated.
+            - FOR "ESD HBM (V)": The Human Body Model (HBM) ESD withstand voltage in volts as a plain number (e.g., 2000 for 2 kV, 8000 for 8 kV). If only an ESD class is given (e.g., Class 2), return the class code (e.g., "2"). Return "N/A" if no HBM rating is stated.
+            - FOR "Terminal Base": The base material of the terminals as free text (e.g., Copper (Cu)), or "N/A" if not stated.
+            - FOR "Terminal Plating": The terminal plating as free text in this style: "Matte Tin (Sn) - with Nickel (Ni) barrier" (name the barrier layer only if the datasheet states it), or "N/A" if not stated.
+            
             Datasheet Text:
             -----------------
             {pdf_text}"""
@@ -122,6 +133,16 @@ OTHER_TEMPLATE = """
             [CATEGORY RULES: {category}]
 {category_rules}
             
+            [ADDITIONAL PROCESSABILITY RULES]
+            - FOR "St. Solder Temp (°C)", "Alt. Solder Temp (°C)" and "Rep. Solder Temp (°C)": For the soldering method chosen in "St. Solder (Standard Solder)", "Alt. Solder (Alternate Solder)" and "Rep. Solder (Repair Solder)", extract the MAXIMUM soldering temperature in °C that the datasheet allows for that method (reflow: peak temperature; wave: solder bath temperature; manual: soldering iron temperature) as a plain number (e.g., 260). Return "N/A" if the method is "no soldering" or the datasheet gives no temperature for it.
+            - FOR "Solder Type": Select ONLY ONE: "Lead-free" (Pb-free, SnAgCu soldering conditions), "Leaded" (SnPb soldering conditions) or "N/A" if the datasheet does not say. If both are given, return "Lead-free".
+            - FOR "Reflow Peak Temp (°C)": The maximum peak temperature (Tp) of the reflow profile that the component can withstand, as a plain number (e.g., 260). Return "N/A" if no reflow profile is given.
+            - FOR "Time Above Liquidus (s)": The maximum time above liquidus (tL) permitted in the reflow profile, in seconds as a plain number. For a range (e.g., 60-150 s) use the upper value. Return "N/A" if not stated.
+            - FOR "Liquidus Temp (°C)": The liquidus temperature TL that "Time Above Liquidus (s)" refers to (e.g., 217 or 183), as a plain number. Return "N/A" if not stated.
+            - FOR "ESD HBM (V)": The Human Body Model (HBM) ESD withstand voltage in volts as a plain number (e.g., 2000 for 2 kV, 8000 for 8 kV). If only an ESD class is given (e.g., Class 2), return the class code (e.g., "2"). Return "N/A" if no HBM rating is stated.
+            - FOR "Terminal Base": The base material of the terminals as free text (e.g., Copper (Cu)), or "N/A" if not stated.
+            - FOR "Terminal Plating": The terminal plating as free text in this style: "Matte Tin (Sn) - with Nickel (Ni) barrier" (name the barrier layer only if the datasheet states it), or "N/A" if not stated.
+            
             Datasheet Text:
             -----------------
             {pdf_text}
@@ -131,7 +152,8 @@ BASE_KEYS = '''"Operating Temperature (Max) (°C)", "Operating Temperature (Min)
             "Length (mm)", "Width (mm)", "Height_Calculation_Logic", "Height (Max)", "Height (mm)",
             "Package Type", "Package Type (EIA)", "Pitch_Calculation_Logic", "Pitch (Footprint) (mm)", "Number of Pins",
             "Kind of Mounting", "Washability", "Varnishability", "St. Solder (Standard Solder)", "Alt. Solder (Alternate Solder)", "Rep. Solder (Repair Solder)", "ESS Suitable",
-            "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)", "Manufacturer"'''
+            "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)", "Manufacturer",
+            "St. Solder Temp (°C)", "Alt. Solder Temp (°C)", "Rep. Solder Temp (°C)", "Solder Type", "Reflow Peak Temp (°C)", "Time Above Liquidus (s)", "Liquidus Temp (°C)", "ESD HBM (V)", "Terminal Base", "Terminal Plating"'''
 
 
 def build_prompt(category, mpn_instruction, pdf_text):
