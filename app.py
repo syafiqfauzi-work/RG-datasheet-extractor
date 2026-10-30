@@ -7,6 +7,7 @@ import random
 import csv 
 import io
 import os
+import copy
 import subprocess
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -17,6 +18,8 @@ from ui_style import apply_style, render_summary
 from extract_rules import detect_manufacturer, detect_commodity_group, quantity_from
 from rules_registry import determine_asi_for_cg
 from rules_rt import rt_designation
+from categories import CATEGORIES, RESISTOR, detect_category
+from prompts import build_prompt
 
 # --- 1. SETTING TAJUK WEB ---
 st.set_page_config(page_title="R* Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
@@ -58,6 +61,358 @@ def get_last_update():
 
 st.caption(f"Analyzer last update on: {get_last_update()} (SGT).")
 
+# --- PANGGILAN MODEL AI (dengan retry) ---
+def call_model(full_prompt, progress_bar):
+    max_retries = 3
+    retry_delay = 15
+    for attempt in range(max_retries):
+        try:
+            api_keys = st.secrets["GEMINI_API_KEY"].split(",")
+            selected_key = random.choice(api_keys).strip()
+            genai.configure(api_key=selected_key)
+            model = genai.GenerativeModel('gemini-3.5-flash-lite')
+
+            response = model.generate_content(
+                full_prompt,
+                generation_config={
+                    "temperature": 0.0,
+                    "response_mime_type": "application/json"
+                }
+            )
+            data = json.loads(response.text, strict=False)
+            progress_bar.progress(80, text="AI extraction complete. Parsing data...")
+            return data
+
+        except KeyError:
+            progress_bar.empty()
+            st.error("⚠️ Sila masukkan GEMINI_API_KEY di dalam Streamlit Secrets.")
+            st.stop()
+
+        except Exception as e:
+            if "429" in str(e) or "Quota" in str(e):
+                if attempt < max_retries - 1:
+                    progress_bar.progress(40, text=f"API limit reached. Auto-retrying in {retry_delay}s... (Trial {attempt+1}/{max_retries})")
+                    time.sleep(retry_delay)
+                else:
+                    progress_bar.empty()
+                    st.error("Failed after 3 trials. Rilex & wait for a minute, then try again.")
+                    st.stop()
+            else:
+                progress_bar.empty()
+                st.error(f"API Error: {e}")
+                st.stop()
+    return None
+
+# --- BACA PDF ---
+def read_pdfs(uploaded_file, spec_file, progress_bar):
+    pdf_text = ""
+            
+    # --- BACA SPEC SHEET DAHULU (JIKA ADA) ---
+    if spec_file is not None:
+        spec_reader = PyPDF2.PdfReader(spec_file)
+        if spec_reader.is_encrypted:
+            try:
+                spec_reader.decrypt("")
+            except Exception:
+                pass
+        spec_text = "".join([page.extract_text() for page in spec_reader.pages if page.extract_text()])
+        pdf_text += f"\n\n=== CRITICAL PRIORITY: SPECIFIC SPEC SHEET ===\n{spec_text}\n\n=== GENERAL DATASHEET ===\n"
+            
+    # --- BACA DATASHEET SEPERTI BIASA ---
+    if uploaded_file is not None:
+        reader = PyPDF2.PdfReader(uploaded_file)
+                
+        # --- PENAPIS KESELAMATAN (SECURITY BYPASS) ---
+        if reader.is_encrypted:
+            try:
+                reader.decrypt("") # Buka kunci AES dengan kata laluan kosong
+            except Exception:
+                st.error("General PDF file is encrypted with Password. Please find un-encrypted PDF.")
+                st.stop()
+        # ---------------------------------------------
+                
+        total_pages = len(reader.pages)
+                
+        # Fasa 1: Membaca PDF (0% - 30%)
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text()
+            if text:
+                pdf_text += f"\n\n--- PAGE {i + 1} ---\n{text}"
+                    
+            prog_val = int(((i + 1) / total_pages) * 30)
+            progress_bar.progress(prog_val, text=f"Reading PDF... (Page {i+1}/{total_pages})")
+    else:
+        progress_bar.progress(30, text="Reading Spec Sheet PDF...")
+    return pdf_text
+
+# --- PAPAR KEPUTUSAN IKUT CATEGORY ---
+def render_results(job, category, raw, dms_df):
+    pdf_text, file_names, target_mpn = job["pdf_text"], job["file_names"], job["mpn"]
+    extracted_data = copy.deepcopy(raw)
+    # Asingkan Designation
+    designation_text = extracted_data.pop("Designation", "N/A")
+    if isinstance(designation_text, dict): 
+        designation_text = designation_text.get("value", "N/A")
+    designation_text = str(designation_text).upper()
+            
+    # --- ASINGKAN MANUFACTURER ---
+    manufacturer_text = extracted_data.pop("Manufacturer", "Unknown")
+    if isinstance(manufacturer_text, dict): 
+        manufacturer_text = manufacturer_text.get("value", "Unknown")
+    # Penapis tegas: nama fail / kandungan PDF mengatasi jawapan AI jika bukti kuat
+    manufacturer_text = detect_manufacturer(pdf_text, file_names) or manufacturer_text
+    # -----------------------------
+            
+    if category == RESISTOR:
+        # --- ASINGKAN COMMODITY GROUP ---
+        cg_options = {
+            "RG": "resistor - fixed value",
+            "RK": "resistor - PTC, NTC, varistor",
+            "RN": "resistor - network",
+            "RR": "resistor - adjustable wire resistor",
+            "RS": "resistor - potentiometer",
+            "RT": "resistor - attenuator, termination",
+            "RX": "resistor - unencapsulated chip",
+            "RZ": "accessory for resistors",
+        }
+        cg_raw = extracted_data.pop("Commodity Group", "Unknown")
+        if isinstance(cg_raw, dict):
+            cg_raw = cg_raw.get("value", "Unknown")
+        cg_code = str(cg_raw).strip().upper()[:2]
+        if cg_code not in cg_options:
+            cg_code = "Unknown"
+        cg_code = detect_commodity_group(pdf_text, file_names, cg_code, quantity_from(extracted_data))
+        cg_text = f"{cg_code} ({cg_options[cg_code]})" if cg_code in cg_options else "Unknown"
+        # --------------------------------
+    else:
+        cg_code = CATEGORIES[category]["cg"]
+        cg_text = f"{cg_code} · {category}"
+            
+    if category == RESISTOR:
+        # --- STANDARDIZE RESISTANCE (e.g., R300 -> 0R3) ---
+        if "Resistance (Ohm)" in extracted_data and isinstance(extracted_data["Resistance (Ohm)"], dict):
+            res_val = str(extracted_data["Resistance (Ohm)"].get("value", "")).upper()
+            if res_val and res_val != "N/A":
+                original_res = res_val
+                    
+                # Tambah '0' jika bermula dengan 'R' (contoh: R300 -> 0R300)
+                if res_val.startswith("R"):
+                    res_val = "0" + res_val
+                        
+                # Buang sifar di belakang (trailing zeros) jika ada huruf R, K, atau M
+                if any(char in res_val for char in ["R", "K", "M"]):
+                    res_val = res_val.rstrip("0")
+                    
+                # Kemaskini jadual UI
+                extracted_data["Resistance (Ohm)"]["value"] = res_val
+                    
+                # Kemaskini Designation supaya sepadan (hanya ubah perkataan rintangan pertama)
+                if designation_text.startswith(original_res):
+                    designation_text = designation_text.replace(original_res, res_val, 1)
+        # -------------------------------------------------
+            
+    if category == RESISTOR:
+        # PENAPIS KETAT: Buang unit /K atau /°C pada PPM
+        designation_text = designation_text.replace("PPM/K", "PPM").replace("PPM/°C", "PPM").replace("PPM/C", "PPM")
+
+        # --- PENAPIS KETAT: Buang tag HF dan AQ dari Designation ---
+        if "HF" in designation_text and "high frequency" not in pdf_text.lower() and "microwave" not in pdf_text.lower():
+            designation_text = designation_text.replace("HF", "")
+            
+        # Paksa buang AQ dari Designation (kerana ia kini berada di Additional Information)
+        designation_text = designation_text.replace("AQ", "").replace("  ", " ").replace("//", "/").strip(" /")
+            
+    # --- TALLY PACKAGE TYPE ---
+    # Paksa 'Package Type (EIA)' menyalin bulat-bulat data dari 'Package Type'
+    if "Package Type" in extracted_data and isinstance(extracted_data["Package Type"], dict):
+        extracted_data["Package Type (EIA)"] = extracted_data["Package Type"].copy()
+
+    # --- PYTHON MATH OVERRIDE UNTUK POWER ---
+    if "Power_Extraction_Logic" in extracted_data:
+        power_item = extracted_data["Power_Extraction_Logic"]
+        if isinstance(power_item, dict):
+            # Gabungkan value & evidence
+            power_str = str(power_item.get("value", "")) + " " + str(power_item.get("evidence", ""))
+            import re
+            # Cari semua corak nombor yang diikuti dengan 'W' (Cth: 1.0 W, 0.65W)
+            wattages = re.findall(r"(\d+(?:\.\d+)?)\s*[Ww]", power_str)
+            if wattages:
+                valid_powers = [float(w) for w in wattages]
+                min_power = min(valid_powers)
+                max_power = max(valid_powers)
+                        
+                if "Power Consumption (W)" not in extracted_data or not isinstance(extracted_data["Power Consumption (W)"], dict):
+                    extracted_data["Power Consumption (W)"] = {"value": "N/A", "evidence": "N/A", "page": "N/A"}
+                        
+                extracted_data["Power Consumption (W)"]["value"] = str(min_power)
+                extracted_data["Power Consumption (W)"]["evidence"] = f"Min value filtered from: {wattages} W"
+                        
+                # --- KEMASKINI DESIGNATION ---
+                # Jika AI terlanjur letak nilai Extended di Designation, Python akan ganti dengan Standard
+                if min_power != max_power:
+                    designation_text = designation_text.replace(f"{max_power}W", f"{min_power}W")
+                    if max_power.is_integer():
+                        designation_text = designation_text.replace(f"{int(max_power)}W", f"{min_power}W")
+
+    # --- PYTHON MATH OVERRIDE UNTUK PITCH ---
+    if "Pitch (Footprint) (mm)" in extracted_data:
+        pitch_item = extracted_data["Pitch (Footprint) (mm)"]
+        if isinstance(pitch_item, dict):
+            calc_str = str(pitch_item.get("evidence", ""))
+            if "-" in calc_str:
+                try:
+                    # Bersihkan tag spec sheet dan label formula
+                    clean_str = calc_str.replace("(From Spec Sheet)", "").replace("Priority Spec Sheet", "")
+                    clean_str = clean_str.replace("Formula:", "").strip(" ()")
+                    parts = clean_str.split("-")
+                    if len(parts) == 2:
+                        pitch_val = float(parts[0].strip()) - float(parts[1].strip())
+                        extracted_data["Pitch (Footprint) (mm)"]["value"] = str(round(pitch_val, 4))
+                        extracted_data["Pitch (Footprint) (mm)"]["evidence"] = clean_str
+                except Exception:
+                    pass
+            
+    # --- PYTHON MATH OVERRIDE UNTUK HEIGHT ---
+    if "Height_Calculation_Logic" in extracted_data:
+        calc_item = extracted_data["Height_Calculation_Logic"]
+        if isinstance(calc_item, dict):
+            calc_str = str(calc_item.get("value", ""))
+            if "+" in calc_str:
+                try:
+                    parts = calc_str.split("+")
+                    h_max = float(parts[0].strip()) + float(parts[1].strip())
+                            
+                    if "Height (Max)" not in extracted_data or not isinstance(extracted_data["Height (Max)"], dict):
+                        extracted_data["Height (Max)"] = {"value": "N/A", "evidence": "N/A", "page": "N/A"}
+                            
+                    extracted_data["Height (Max)"]["value"] = str(round(h_max, 4))
+                    extracted_data["Height (Max)"]["evidence"] = calc_str
+                except Exception:
+                    pass
+                            
+    # --- TALLY SUHU (RF): ambient temp = Operating Temperature dalam tab Top ---
+    if category.startswith("RF "):
+        for amb, top in (("Min. ambient temp. (°C)", "Operating Temperature (Min) (°C)"),
+                         ("Max. ambient temp. (°C)", "Operating Temperature (Max) (°C)")):
+            t_item = extracted_data.get(top)
+            if isinstance(t_item, dict) and str(t_item.get("value", "N/A")).strip() not in ("", "N/A"):
+                extracted_data[amb] = dict(t_item)
+                            
+    # Buang kertas conteng AI dari paparan jadual
+    extracted_data.pop("TCR_Calculation_Logic", None)
+    extracted_data.pop("Resistance_Calculation_Logic", None)
+    extracted_data.pop("Row_Data_Extraction", None)
+    extracted_data.pop("Power_Extraction_Logic", None)
+    extracted_data.pop("Pitch_Calculation_Logic", None)
+    extracted_data.pop("Height_Calculation_Logic", None)
+            
+    # --- ASI DETERMINATION (peraturan ikut Commodity Group; guna nilai akhir selepas semua override) ---
+    asi_result = determine_asi_for_cg(cg_code, extracted_data, designation_text, manufacturer_text, pdf_text, file_names, category)
+    if category == "RF Attenuator" and asi_result.get("rt"):
+        designation_text = rt_designation(asi_result["rt"]) or "N/A"
+    elif category != RESISTOR:
+        designation_text = "N/A"   # format designation hanya ditakrif untuk Resistor constant (dan RF Attenuator)
+            
+            
+    rekod_mpn = target_mpn.upper() if target_mpn else "General (No MPN)"
+            
+    render_summary(designation_text, manufacturer_text, cg_text, asi_result, target_mpn,
+                   rule_applies=(asi_result["label"] != "No rule"), na_text="No rule loaded")
+            
+    # --- DEFINISI KATEGORI ---
+    keys_top = ["Operating Temperature (Max) (°C)", "Operating Temperature (Min) (°C)", "Storage Temperature (Max) (°C)", "Storage Temperature (Min) (°C)"]
+    keys_library = ["Length (mm)", "Width (mm)", "Height (Max)", "Package Type (EIA)", "Pitch (Footprint) (mm)", "Number of Pins"]
+    keys_processability = ["Kind of Mounting", "Washability", "Varnishability", "St. Solder (Standard Solder)", "Alt. Solder (Alternate Solder)", "Rep. Solder (Repair Solder)", "ESS Suitable", "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)"]
+    keys_techn_active = CATEGORIES[category]["techn"]
+
+    def build_table(keys_list, data_dict):
+        specs, values, units, evidences, pages = [], [], [], [], []
+        for key in keys_list:
+            item = data_dict.get(key, {"value": "N/A", "evidence": "N/A", "page": "N/A"})
+            if isinstance(item, str):
+                val, ev, pg = item, "N/A", "N/A"
+            else:
+                val = item.get("value", "N/A")
+                ev = item.get("evidence", "N/A")
+                pg = item.get("page", "N/A")
+                        
+            # Asingkan Unit
+            unit_str = "-"
+            if key == "Temperature Coefficient" and val != "N/A":
+                if "ppm/°C" in val:
+                    val, unit_str = val.replace("ppm/°C", "").strip(), "ppm/°C"
+                elif "ppm/K" in val:
+                    val, unit_str = val.replace("ppm/K", "").strip(), "ppm/K"
+                elif "ppm/C" in val: 
+                    val, unit_str = val.replace("ppm/C", "").strip(), "ppm/°C"
+                            
+            elif "(°C)" in key: key, unit_str = key.replace(" (°C)", ""), "°C"
+            elif "(mm)" in key: key, unit_str = key.replace(" (mm)", ""), "mm"
+            elif "(Ohm)" in key: key, unit_str = key.replace(" (Ohm)", ""), "Ohm"
+            elif "(dB)" in key: key, unit_str = key.replace(" (dB)", ""), "dB"
+            elif "(dBm)" in key: key, unit_str = key.replace(" (dBm)", ""), "dBm"
+            elif "(Hz)" in key: key, unit_str = key.replace(" (Hz)", ""), "Hz"
+            elif "(A)" in key: key, unit_str = key.replace(" (A)", ""), "A"
+            elif "(GHz)" in key: key, unit_str = key.replace(" (GHz)", ""), "GHz"
+            elif "(%)" in key: key, unit_str = key.replace(" (%)", ""), "%"
+            elif "(V)" in key: key, unit_str = key.replace(" (V)", ""), "V"
+            elif "(W)" in key: key, unit_str = key.replace(" (W)", ""), "W"
+            elif "(ppm/K)" in key: key, unit_str = key.replace(" (ppm/K)", ""), "ppm/K"
+            elif "(s)" in key: key, unit_str = key.replace(" (s)", ""), "s"
+            elif "(cycles)" in key: key, unit_str = key.replace(" (cycles)", ""), "cycles"
+                    
+            specs.append(key)
+            values.append(val)
+            units.append(unit_str)
+            evidences.append(ev)
+            pages.append(pg)
+                    
+        return {"Specification": specs, "Extracted Value": values, "Unit": units, "Page": pages, "Source Evidence": evidences}
+
+    # --- 6 TABS UI (keputusan ASI dipaparkan dalam tab Top) ---
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter", "Alternative", "DMS Check"])
+    with tab1:
+        if asi_result["label"] == "No rule":
+            st.warning(f"No standardization rule is loaded for {cg_code} yet, so no ASI was determined.")
+        left, right = st.columns([3, 2])
+        with left:
+            st.subheader("ASI Result")
+            render_asi(asi_result)
+        with right:
+            st.subheader("Temperature")
+            st.table(build_table(keys_top, extracted_data))
+    with tab2: st.table(build_table(keys_library, extracted_data))
+    with tab3: st.table(build_table(keys_processability, extracted_data))
+    with tab4: st.table(build_table(keys_techn_active, extracted_data))
+    with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result, dms_df, target_mpn, cg_code)
+    with tab6: render_duplicate_check(dms_df, target_mpn, extracted_data, designation_text, cg_code)
+            
+    # --- JANA FAIL EXCEL (CSV) ---
+    all_keys = keys_top + keys_library + keys_processability + keys_techn_active
+    all_data = build_table(all_keys, extracted_data)
+            
+    csv_buffer = io.StringIO()
+    csv_buffer.write('\ufeff') 
+            
+    writer = csv.writer(csv_buffer)
+    writer.writerow(["Specification", "Extracted Value", "Unit", "Page", "Source Evidence"]) 
+            
+    for i in range(len(all_data["Specification"])):
+        writer.writerow([all_data["Specification"][i], all_data["Extracted Value"][i], all_data["Unit"][i], all_data["Page"][i], all_data["Source Evidence"][i]])
+            
+    # Tambah keputusan ASI di hujung CSV
+    for row in asi_csv_rows(asi_result):
+        writer.writerow(row)
+            
+    st.divider()
+    st.download_button(
+        label="📥 Download Report (CSV)",
+        data=csv_buffer.getvalue(),
+        file_name=f"{rekod_mpn}_Report.csv",
+        mime="text/csv"
+    )
+            
+
 # --- 2. INISIALISASI MEMORI (SESSION STATE) ---
 if "reset_key" not in st.session_state:
     st.session_state.reset_key = 0
@@ -72,6 +427,8 @@ with c_mpn:
 with c_reset:
     if st.button("Reset", use_container_width=True):
         st.session_state.reset_key += 1
+        st.session_state.pop("job", None)
+        st.session_state.pop("cat_choice", None)
         st.rerun()
 
 # --- UI DUAL UPLOAD ---
@@ -87,435 +444,72 @@ if uploaded_file is not None or spec_file is not None:
     with c_btn:
         run_extract = st.button("Extract Data", type="primary", use_container_width=True)
     if run_extract:
-        progress_text = "Starting extraction process..."
-        progress_bar = status_box.progress(0, text=progress_text)
-        
+        progress_bar = status_box.progress(0, text="Starting extraction process...")
         try:
-            pdf_text = ""
-            
-            # --- BACA SPEC SHEET DAHULU (JIKA ADA) ---
-            if spec_file is not None:
-                spec_reader = PyPDF2.PdfReader(spec_file)
-                if spec_reader.is_encrypted:
-                    try:
-                        spec_reader.decrypt("")
-                    except Exception:
-                        pass
-                spec_text = "".join([page.extract_text() for page in spec_reader.pages if page.extract_text()])
-                pdf_text += f"\n\n=== CRITICAL PRIORITY: SPECIFIC SPEC SHEET ===\n{spec_text}\n\n=== GENERAL DATASHEET ===\n"
-            
-            # --- BACA DATASHEET SEPERTI BIASA ---
-            if uploaded_file is not None:
-                reader = PyPDF2.PdfReader(uploaded_file)
-                
-                # --- PENAPIS KESELAMATAN (SECURITY BYPASS) ---
-                if reader.is_encrypted:
-                    try:
-                        reader.decrypt("") # Buka kunci AES dengan kata laluan kosong
-                    except Exception:
-                        st.error("General PDF file is encrypted with Password. Please find un-encrypted PDF.")
-                        st.stop()
-                # ---------------------------------------------
-                
-                total_pages = len(reader.pages)
-                
-                # Fasa 1: Membaca PDF (0% - 30%)
-                for i, page in enumerate(reader.pages):
-                    text = page.extract_text()
-                    if text:
-                        pdf_text += f"\n\n--- PAGE {i + 1} ---\n{text}"
-                    
-                    prog_val = int(((i + 1) / total_pages) * 30)
-                    progress_bar.progress(prog_val, text=f"Reading PDF... (Page {i+1}/{total_pages})")
-            else:
-                progress_bar.progress(30, text="Reading Spec Sheet PDF...")
-            
+            pdf_text = read_pdfs(uploaded_file, spec_file, progress_bar)
             mpn_instruction = f"Focus ONLY on the specifications for this specific MPN: {target_mpn}." if target_mpn else "Extract the general specifications from the datasheet."
             
-            full_prompt = f"""
-            Act as an expert electronics engineer. {mpn_instruction}
-            Review the provided datasheet text and accurately extract the requested information. 
+            # --- AI/kata kunci tentukan CATEGORY dahulu (pengguna boleh tukar kemudian) ---
+            file_names = [f.name for f in (uploaded_file, spec_file) if f is not None]
+            category, cat_confident = detect_category(pdf_text, file_names)
             
-            Extract these exact keys:
-            "Operating Temperature (Max) (°C)", "Operating Temperature (Min) (°C)", 
-            "Storage Temperature (Max) (°C)", "Storage Temperature (Min) (°C)", 
-            "Length (mm)", "Width (mm)", "Height_Calculation_Logic", "Height (Max)", "Height (mm)", 
-            "Package Type", "Package Type (EIA)", "Pitch_Calculation_Logic", "Pitch (Footprint) (mm)", "Number of Pins", "Resistance_Calculation_Logic", 
-            "Resistance (Ohm)", "Tolerance (%)", "Row_Data_Extraction", "Voltage (V)", "Function", 
-            "Power_Extraction_Logic", "Power Consumption (W)", "TCR_Calculation_Logic", "Temperature Coefficient",
-            "Kind of Mounting", "Washability", "Varnishability", "St. Solder (Standard Solder)", 
-            "Alt. Solder (Alternate Solder)", "Rep. Solder (Repair Solder)", "ESS Suitable", 
-            "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)",
-            "Manufacturer", "Designation", "Additional Information", "Quantity", "Commodity Group",
-            "Attenuation (dB)", "Impedance (Ohm)", "Frequency Max (GHz)"
-
-            Important Instructions:
-            - Return strictly a valid JSON object with the keys above.
-            - CRITICAL JSON RULE 1: Do NOT use unescaped double quotes (") inside any of your text explanations or values. Use single quotes (') instead.
-            - CRITICAL JSON RULE 2: Do NOT include raw newline characters (\n), carriage returns (\r), or tabs (\t) inside any JSON string values. Replace them with standard spaces.
-            - FOR ALL OTHER KEYS: Return a nested JSON object with three fields: "value" (the string value, or "N/A"), "evidence" (a short exact quote from the text), and "page" (the exact Page number where it was found, e.g., "1", or "N/A").
-            
-            [PROCESSABILITY RULES]
-            - FOR "Kind of Mounting": Select ONLY ONE: "SMT (surface-mounting technology)", "THR, PiP (through-hole technology)", "press-fit", "THW (through-hole technology)", "ceramic substrate technology (Chip microwave)", "none", or "fine press-fit".
-              * CRITICAL LOGIC: If the datasheet mentions traditional leaded components or soldering via "wave or dipping", select "THW (through-hole technology)". If it explicitly mentions "Through-Hole Reflow", "THR", or "Pin-in-Paste (PiP)", select "THR, PiP (through-hole technology)". If it is a standard surface mount chip/SMD, select "SMT (surface-mounting technology)".
-            - FOR "St. Solder (Standard Solder)": Select ONLY ONE: "reflow soldering top / bottom", "reflow soldering top - only", "wave soldering bottom", "manually soldering / bonding", or "no soldering".
-            - FOR "Alt. Solder (Alternate Solder)": Select ONLY ONE: "selective hot air soldering", "wave soldering bottom", "selective wave soldering", "manually soldering", or "no soldering".
-            - FOR "Rep. Solder (Repair Solder)": Select ONLY ONE: "selective hot air soldering", "manually soldering", or "no soldering".
-            - FOR "ESS Suitable": Evaluate the extracted Operating Temperatures. If the Operating Temperature goes OUTSIDE the standard range (e.g., Min is colder than -20°C OR Max is hotter than 75°C), select "ESS released". If the temperatures fall strictly WITHIN -20°C to 75°C (like +5 to +35 °C), select "not ESS released". If there is no information available for the Operating Temperature, strictly return "N/A".
-            - FOR "Washability" and "Varnishability": Select "Yes" or "No" if explicitly stated in the datasheet. If there is no information available regarding washability or varnishability, strictly return "N/A".
-            - FOR REFLOW ("Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)"): Extract ONLY the raw nominal numerical value. Discard any text, units (e.g., seconds, s, °C, cycles), and tolerances (e.g., for "10 ± 1 seconds immersion time", return "10"; for "260 °C ± 5 °C", return "260").
-            
-            [GENERAL RULES]
-            - MASTER RULE FOR SPEC SHEETS: If the text contains a "CRITICAL PRIORITY: SPECIFIC SPEC SHEET" section, you MUST extract all available values directly from that section first. You are ALLOWED to skip complex table extraction logic. HOWEVER, for calculated fields like Height (Max), Pitch, or Voltage, you MUST still write your exact mathematical step-by-step calculation in the "evidence" field, followed by the tag "(From Spec Sheet)". Example: "Pitch = Length (5.08) - Terminal (1.47) (From Spec Sheet)" or "Height = 0.64 + 0.25 (From Spec Sheet)".
-            - FOR "Resistance_Calculation_Logic": If a target MPN is provided, determine the resistance code. 1) If the code contains an 'R' (e.g., R300, R3000, 1R50), extract it. If it starts with 'R', prepend a '0' (e.g., R300 -> 0R300). Then remove trailing zeros at the end (e.g., 0R300 -> 0R3, 1R50 -> 1R5). 2) If it is a standard numeric code (e.g., 1828), let XYZ=182, M=8. If M='7' output "0RXYZ"; If M='8' output "XRYZ"; If M='9' output "XYRZ"; If M='0' output "XYZR"; If M='1' output "XKYZ"; If M='2' output "XYKZ"; If M='3' output "XYZK"; If M='4' output "XMYZ"; If M='5' output "XYMZ"; If M='6' output "XYZM".
-            - FOR "Resistance (Ohm)": Extract ONLY the final string generated from the XYZ rule in "Resistance_Calculation_Logic". ABSOLUTELY NO DECIMALS.
-            - FOR "Row_Data_Extraction": PDF tables are flattened. Find the target Part No. (e.g., ERJP06). The values immediately following it are typically: [Size] [Power] [Ambient Temp] [Terminal Temp] [Limiting Voltage] [Overload Voltage]. (e.g., "ERJP06 (0805) 0.50 70 115 400 600"). Isolate and write down this exact sequence for your specific MPN to prevent grabbing data from the wrong row.
-            - FOR "Voltage (V)": Look STRICTLY at the isolated sequence in "Row_Data_Extraction". Extract the "Limiting element voltage" (which is typically the 4th numeric value after the package size). Example: If the sequence is "0.50 70 115 400", the voltage is 400. Do NOT grab voltages from other part numbers.
-            - FOR "TCR_Calculation_Logic": Look at the isolated data for your specific Part No. 1) State the exact resistance in Ohms. 2) Find the T.C.R. sub-ranges for this part. 3) Evaluate the resistance mathematically. Example: 1000 Ohms is greater than 33 Ohms, so it matches the condition "33Ω ≤ R : ±100" (NOT R < 33Ω). 4) State the correct T.C.R.
-            - FOR "Temperature Coefficient": Look STRICTLY at the mathematical range you just determined in "TCR_Calculation_Logic". Extract ONLY the specific T.C.R. value assigned to that exact range. Extract the numerical value TOGETHER WITH its exact unit (e.g., "200 ppm/°C"). Discard "±".
-            - FOR DIMENSIONS (Length, Width, Height (mm)): If a value includes a tolerance (e.g., 0.60 ± 0.03), extract ONLY the nominal base value (e.g., 0.60) and discard the tolerance completely.
-            - FOR THE "Function" KEY: Select ONLY ONE: "Thin Film", "Thick Film", "Metal Foil", "Wire-wound", or "Carbon Film".
-            - FOR "Height_Calculation_Logic": 1) Extract the raw height dimension string. 2) If it contains dual units like "inches (mm)", you MUST isolate ONLY the millimeter portion completely inside the parentheses (e.g., from "0.025 ± 0.010 (0.635 ± 0.254)", isolate "0.635 ± 0.254"). 3) Identify the nominal mm value (X) and the positive mm tolerance (Y). 4) Output EXACTLY in this format: "X + Y" (e.g., "0.635 + 0.254"). DO NOT compute.
-            - FOR "Height (Max)": Output "N/A" (This will be calculated externally).
-            - FOR "Height (mm)": Extract ONLY the nominal mm value identified in "Height_Calculation_Logic", discarding any tolerance. Do NOT extract values labeled "T" (Thickness/Terminal) if "H" (Height) is available.
-            - FOR "Package Type": Return the value EXACTLY in this format: EIA[Package EIA Size]*. For example, if the size is 0201, return "EIA0201*". Do NOT extract shipping or delivery packaging methods (e.g., Tape and Reel, Paper Taping Reel, Bulk, Tube).
-            - FOR "Power_Extraction_Logic": 1) Identify target package size. 2) Scan ALL pages. Find EVERY wattage (W) value associated with this size (Check both "Technical Specifications" and "MAXIMUM RESISTANCE CHANGE" tables). 3) Output a list of ALL found wattages. You MUST include the 'W' unit for each. Example output: "1.0 W, 0.65 W, 1.0 W". DO NOT pick one, list ALL of them.
-            - FOR "Power Consumption (W)": Output "N/A" for the "value" (This will be intercepted and calculated externally).
-            - FOR VOLTAGE: If the datasheet lists multiple operation modes (e.g., "Standard" vs "Extended"), strictly extract the values for the "Standard" operation mode. Do not extract the Extended or maximum rating if a Standard mode is available.
-              * Note 1: If Power is provided as a fraction (e.g., 1/20, 1/4, 1/8), you MUST calculate and return it strictly as a DECIMAL (e.g., 0.05, 0.25, 0.125) for both the "Power Consumption (W)" key and the "Designation" string.
-              * Note 2: If the datasheet specifies a formula like "(P x R)1/2" instead of a direct number, calculate it mathematically using your final Power (W) and Resistance (Ohm) values. Round the final calculated value to exactly 4 decimal places (e.g., "0.5477") for the "value" field. In the "evidence" field, write your step-by-step calculation (e.g., "Formula: (P x R)^1/2 -> sqrt(1.0W x 0.3Ohm)").
-           - FOR "Pitch_Calculation_Logic": YOU MUST OUTPUT A MATRIX. 1) State nominal Length (L) in mm. 2) List ALL Terminal Widths (T) and their exact Resistance Ranges line-by-line (e.g., "Range 1: 0.001 to 0.0069, T = 1.47 | Range 2: 0.007 to 0.5, T = 0.508"). 3) State the target MPN resistance. 4) State exactly which range it falls into by comparing decimals. 5) Output the final formula AT THE VERY END in exactly this format: "Formula: L - T" (e.g., "Formula: 5.08 - 0.508").
-            - FOR "Pitch (Footprint) (mm)": Output "N/A" for the "value" field. For the "evidence" field, extract ONLY the exact formula string generated at the very end of "Pitch_Calculation_Logic" (e.g., "5.08 - 0.508"). Discard the matrix text.
-            - FOR THE "Designation" KEY: Construct a string following EXACTLY this format: 
-              [Resistance] [Tolerance] [Temperature coefficient] [Power] [RAW Package EIA] [Additional Info]
-              * Note 1: For [Resistance], strictly use the R/K/M formatted value (e.g., use "5R11", do NOT use "5.11"). CRITICAL FOR JUMPERS: If the component is a Jumper (or has 0 Ohm resistance), you MUST explicitly set [Resistance] to "0R" at the very beginning of the designation. Do NOT leave it blank. For jumpers, you should replace the [Power] section with the maximal applicable current (e.g., "40A").
-              * Note 2: For [RAW Package EIA], use ONLY the bare numeric code (e.g., 0201, 0402). Do NOT include the "EIA" prefix or the "*" asterisk in this designation string.
-              * Note 3: For [Additional Info] in Designation, scan the datasheet and append ONLY these exact tags if found (separate with '/'): HF, PP, HP, HV, AS, FT, SM, AIN, AU, AG, CU. (CRITICAL: Do NOT include "AQ" or Automotive Grade in this designation string). If no tags apply, leave empty. Evaluate these specific mappings:
-                - "HF": High Frequency (CRITICAL: Do NOT append this tag if the letters "HF" in the datasheet refer to "Halogen Free" or are associated with RoHS/environmental compliance).
-                - "PP": High Pulse, Pulse Proof, or Anti Surge
-                - "HP": High Power (power higher than standard)
-                - "HV": High Voltage
-                - "AS": Anti Sulfurated or Anti-Sulfur
-                - "FT": Flexiterm, Flexible Termination, or Soft Termination
-                - "SM": Special Mounting (Flange, Chassis, Stacked)
-                - "AIN": Aluminium Nitride material
-                - "AU": Gold (Au) contact surface
-                - "AG": Silver (Ag) contact surface
-                - "CU": Copper (Cu) contact surface
-              * Note 4: For [Temperature coefficient], use ONLY the numeric value followed by "PPM". You MUST drop the "/K" or "/°C" completely. Example: use "50PPM", NEVER "50PPM/K" or "50PPM/°C".
-              * Example output: 5R11 1% 200PPM 0.1W 0603 PP/AS
-            - FOR "Manufacturer": Identify the manufacturer of the component from the datasheet. You MUST select strictly from this exact list: "Analog Devices, Inc.", "Barry Industries Inc.", "Bourns Inc.", "Caddock Electronics, Inc", "Diconex", "EMC TECHNIK & CONSULTING GmbH", "Fenghua (H.K.) Electronics Ltd.", "IMS - International Manufacturing S", "Knowles Corporation", "Kyocera AVX Components Ltd.", "Littelfuse, Inc.", "MACOM", "Marki Microwave", "Mini-Circuits, Inc.", "Panasonic Corporation", "RES-NET Microwave, Inc.", "Smiths Interconnect", "Spectrum Control (API Technologies)", "Susumu Co., LTD", "TDK Corporation", "TTM Technologies Inc.", "Vishay Intertechnology, Inc.", or "Yageo Corporation". If the exact manufacturer is not in this list, return "Unknown".
-            - FOR "Additional Information": Scan the datasheet for special qualifications. If the component is AEC-Q200 qualified or explicitly stated as Automotive Grade, you MUST extract and output "AQ". You may also list other special features here if found. If nothing is found, return "N/A".
-            - FOR "Quantity": Determine the number of isolated resistor elements or circuits within the component package. For a standard single chip resistor, strictly return "1" for the value, and for the "evidence" field, you MUST output this exact fixed statement: "Standard single chip resistor". For resistor arrays or networks, return the exact number of elements (e.g., "2", "4") and quote the relevant array feature as evidence.
-            - FOR "Commodity Group": Select ONLY ONE code from this exact list: "RG" (resistor - fixed value: standard chip, thin film, thick film, metal film, carbon film, MELF, fixed wire-wound, jumpers / 0 Ohm, current sense), "RK" (resistor - PTC, NTC, varistor: includes PTC/NTC thermistors, polymeric PTC resettable fuses such as PolySwitch, and varistors), "RN" (resistor - network: several resistor elements in one package, i.e. Quantity greater than 1), "RR" (resistor - adjustable wire resistor), "RS" (resistor - potentiometer, trimmer), "RT" (resistor - attenuator, termination: includes RF attenuators, terminations and RF equalizers), "RX" (resistor - unencapsulated chip, bare die), or "RZ" (accessory for resistors, e.g. heat sink, clip, mounting hardware). NEVER return RJ, RL, RV or RW (obsolete). A standard single fixed resistor is "RG". If the component does not clearly fit, return "Unknown".
-            - FOR "Attenuation (dB)": ONLY for attenuators and equalizers: the nominal attenuation in dB as a plain number (e.g., 6). For every other component return "N/A".
-            - FOR "Impedance (Ohm)": The characteristic or system impedance as a plain number (e.g., 50). Return "N/A" if it is not stated or not applicable.
-            - FOR "Frequency Max (GHz)": The maximum operating frequency in GHz as a plain number (e.g., 18). Return "N/A" if it is not stated or not applicable.
-            
-            Datasheet Text:
-            -----------------
-            {pdf_text}
-            """
-            
-            # Fasa 2: Menghantar ke AI (30% - 80%)
-            progress_bar.progress(40, text="Analyzing datasheet using AI... This may take a minute.")
-            
-            max_retries = 3
-            retry_delay = 15 
-            extracted_data = None
-            
-            for attempt in range(max_retries):
-                try:
-                    api_keys = st.secrets["GEMINI_API_KEY"].split(",")
-                    selected_key = random.choice(api_keys).strip()
-                    genai.configure(api_key=selected_key)
-                    model = genai.GenerativeModel('gemini-3.5-flash-lite')
-                    
-                    response = model.generate_content(
-                        full_prompt,
-                        generation_config={
-                            "temperature": 0.0,
-                            "response_mime_type": "application/json"
-                        }
-                    )
-                    extracted_data = json.loads(response.text, strict=False)
-                    progress_bar.progress(80, text="AI extraction complete. Parsing data...")
-                    break 
-                    
-                except KeyError:
-                    progress_bar.empty()
-                    st.error("⚠️ Sila masukkan GEMINI_API_KEY di dalam Streamlit Secrets.")
-                    st.stop()
-                    
-                except Exception as e:
-                    if "429" in str(e) or "Quota" in str(e):
-                        if attempt < max_retries - 1:
-                            progress_bar.progress(40, text=f"API limit reached. Auto-retrying in {retry_delay}s... (Trial {attempt+1}/{max_retries})")
-                            time.sleep(retry_delay)
-                        else:
-                            progress_bar.empty()
-                            st.error("Failed after 3 trials. Rilex & wait for a minute, then try again.")
-                            st.stop() 
-                    else:
-                        progress_bar.empty()
-                        st.error(f"API Error: {e}")
-                        st.stop()
-            
-            if not extracted_data:
+            progress_bar.progress(40, text=f"Analyzing datasheet using AI ({category})... This may take a minute.")
+            raw = call_model(build_prompt(category, mpn_instruction, pdf_text), progress_bar)
+            if not raw:
                 st.stop()
             
-            # Fasa 3: Menyusun UI & CSV (80% - 100%)
-            progress_bar.progress(90, text="Building UI tables and CSV report...")
+            # Jika kategori tidak pasti, AI mengesahkan; ekstrak semula hanya jika AI nampak kategori lain
+            if category == RESISTOR and not cat_confident:
+                ai_cat = raw.get("Category", "")
+                if isinstance(ai_cat, dict):
+                    ai_cat = ai_cat.get("value", "")
+                ai_cat = str(ai_cat).strip()
+                if ai_cat in CATEGORIES and ai_cat != RESISTOR:
+                    progress_bar.progress(60, text=f"Category looks like {ai_cat}: extracting again...")
+                    category = ai_cat
+                    raw = call_model(build_prompt(category, mpn_instruction, pdf_text), progress_bar)
+                    if not raw:
+                        st.stop()
+            raw.pop("Category", None)
             
-            # Asingkan Designation
-            designation_text = extracted_data.pop("Designation", "N/A")
-            if isinstance(designation_text, dict): 
-                designation_text = designation_text.get("value", "N/A")
-            designation_text = str(designation_text).upper()
-            
-            # --- ASINGKAN MANUFACTURER ---
-            manufacturer_text = extracted_data.pop("Manufacturer", "Unknown")
-            if isinstance(manufacturer_text, dict): 
-                manufacturer_text = manufacturer_text.get("value", "Unknown")
-            # Penapis tegas: nama fail / kandungan PDF mengatasi jawapan AI jika bukti kuat
-            file_names = [f.name for f in (uploaded_file, spec_file) if f is not None]
-            manufacturer_text = detect_manufacturer(pdf_text, file_names) or manufacturer_text
-            # -----------------------------
-            
-            # --- ASINGKAN COMMODITY GROUP ---
-            cg_options = {
-                "RG": "resistor - fixed value",
-                "RK": "resistor - PTC, NTC, varistor",
-                "RN": "resistor - network",
-                "RR": "resistor - adjustable wire resistor",
-                "RS": "resistor - potentiometer",
-                "RT": "resistor - attenuator, termination",
-                "RX": "resistor - unencapsulated chip",
-                "RZ": "accessory for resistors",
-            }
-            cg_raw = extracted_data.pop("Commodity Group", "Unknown")
-            if isinstance(cg_raw, dict):
-                cg_raw = cg_raw.get("value", "Unknown")
-            cg_code = str(cg_raw).strip().upper()[:2]
-            if cg_code not in cg_options:
-                cg_code = "Unknown"
-            cg_code = detect_commodity_group(pdf_text, file_names, cg_code, quantity_from(extracted_data))
-            cg_text = f"{cg_code} ({cg_options[cg_code]})" if cg_code in cg_options else "Unknown"
-            # --------------------------------
-            
-            # --- STANDARDIZE RESISTANCE (e.g., R300 -> 0R3) ---
-            if "Resistance (Ohm)" in extracted_data and isinstance(extracted_data["Resistance (Ohm)"], dict):
-                res_val = str(extracted_data["Resistance (Ohm)"].get("value", "")).upper()
-                if res_val and res_val != "N/A":
-                    original_res = res_val
-                    
-                    # Tambah '0' jika bermula dengan 'R' (contoh: R300 -> 0R300)
-                    if res_val.startswith("R"):
-                        res_val = "0" + res_val
-                        
-                    # Buang sifar di belakang (trailing zeros) jika ada huruf R, K, atau M
-                    if any(char in res_val for char in ["R", "K", "M"]):
-                        res_val = res_val.rstrip("0")
-                    
-                    # Kemaskini jadual UI
-                    extracted_data["Resistance (Ohm)"]["value"] = res_val
-                    
-                    # Kemaskini Designation supaya sepadan (hanya ubah perkataan rintangan pertama)
-                    if designation_text.startswith(original_res):
-                        designation_text = designation_text.replace(original_res, res_val, 1)
-            # -------------------------------------------------
-            
-            # PENAPIS KETAT: Buang unit /K atau /°C pada PPM
-            designation_text = designation_text.replace("PPM/K", "PPM").replace("PPM/°C", "PPM").replace("PPM/C", "PPM")
-
-            # --- PENAPIS KETAT: Buang tag HF dan AQ dari Designation ---
-            if "HF" in designation_text and "high frequency" not in pdf_text.lower() and "microwave" not in pdf_text.lower():
-                designation_text = designation_text.replace("HF", "")
-            
-            # Paksa buang AQ dari Designation (kerana ia kini berada di Additional Information)
-            designation_text = designation_text.replace("AQ", "").replace("  ", " ").replace("//", "/").strip(" /")
-            
-            # --- TALLY PACKAGE TYPE ---
-            # Paksa 'Package Type (EIA)' menyalin bulat-bulat data dari 'Package Type'
-            if "Package Type" in extracted_data and isinstance(extracted_data["Package Type"], dict):
-                extracted_data["Package Type (EIA)"] = extracted_data["Package Type"].copy()
-
-            # --- PYTHON MATH OVERRIDE UNTUK POWER ---
-            if "Power_Extraction_Logic" in extracted_data:
-                power_item = extracted_data["Power_Extraction_Logic"]
-                if isinstance(power_item, dict):
-                    # Gabungkan value & evidence
-                    power_str = str(power_item.get("value", "")) + " " + str(power_item.get("evidence", ""))
-                    import re
-                    # Cari semua corak nombor yang diikuti dengan 'W' (Cth: 1.0 W, 0.65W)
-                    wattages = re.findall(r"(\d+(?:\.\d+)?)\s*[Ww]", power_str)
-                    if wattages:
-                        valid_powers = [float(w) for w in wattages]
-                        min_power = min(valid_powers)
-                        max_power = max(valid_powers)
-                        
-                        if "Power Consumption (W)" not in extracted_data or not isinstance(extracted_data["Power Consumption (W)"], dict):
-                            extracted_data["Power Consumption (W)"] = {"value": "N/A", "evidence": "N/A", "page": "N/A"}
-                        
-                        extracted_data["Power Consumption (W)"]["value"] = str(min_power)
-                        extracted_data["Power Consumption (W)"]["evidence"] = f"Min value filtered from: {wattages} W"
-                        
-                        # --- KEMASKINI DESIGNATION ---
-                        # Jika AI terlanjur letak nilai Extended di Designation, Python akan ganti dengan Standard
-                        if min_power != max_power:
-                            designation_text = designation_text.replace(f"{max_power}W", f"{min_power}W")
-                            if max_power.is_integer():
-                                designation_text = designation_text.replace(f"{int(max_power)}W", f"{min_power}W")
-
-            # --- PYTHON MATH OVERRIDE UNTUK PITCH ---
-            if "Pitch (Footprint) (mm)" in extracted_data:
-                pitch_item = extracted_data["Pitch (Footprint) (mm)"]
-                if isinstance(pitch_item, dict):
-                    calc_str = str(pitch_item.get("evidence", ""))
-                    if "-" in calc_str:
-                        try:
-                            # Bersihkan tag spec sheet dan label formula
-                            clean_str = calc_str.replace("(From Spec Sheet)", "").replace("Priority Spec Sheet", "")
-                            clean_str = clean_str.replace("Formula:", "").strip(" ()")
-                            parts = clean_str.split("-")
-                            if len(parts) == 2:
-                                pitch_val = float(parts[0].strip()) - float(parts[1].strip())
-                                extracted_data["Pitch (Footprint) (mm)"]["value"] = str(round(pitch_val, 4))
-                                extracted_data["Pitch (Footprint) (mm)"]["evidence"] = clean_str
-                        except Exception:
-                            pass
-            
-            # --- PYTHON MATH OVERRIDE UNTUK HEIGHT ---
-            if "Height_Calculation_Logic" in extracted_data:
-                calc_item = extracted_data["Height_Calculation_Logic"]
-                if isinstance(calc_item, dict):
-                    calc_str = str(calc_item.get("value", ""))
-                    if "+" in calc_str:
-                        try:
-                            parts = calc_str.split("+")
-                            h_max = float(parts[0].strip()) + float(parts[1].strip())
-                            
-                            if "Height (Max)" not in extracted_data or not isinstance(extracted_data["Height (Max)"], dict):
-                                extracted_data["Height (Max)"] = {"value": "N/A", "evidence": "N/A", "page": "N/A"}
-                            
-                            extracted_data["Height (Max)"]["value"] = str(round(h_max, 4))
-                            extracted_data["Height (Max)"]["evidence"] = calc_str
-                        except Exception:
-                            pass
-                            
-            # Buang kertas conteng AI dari paparan jadual
-            extracted_data.pop("TCR_Calculation_Logic", None)
-            extracted_data.pop("Resistance_Calculation_Logic", None)
-            extracted_data.pop("Row_Data_Extraction", None)
-            extracted_data.pop("Power_Extraction_Logic", None)
-            extracted_data.pop("Pitch_Calculation_Logic", None)
-            extracted_data.pop("Height_Calculation_Logic", None)
-            
-            # --- ASI DETERMINATION (peraturan ikut Commodity Group; guna nilai akhir selepas semua override) ---
-            asi_result = determine_asi_for_cg(cg_code, extracted_data, designation_text, manufacturer_text, pdf_text, file_names)
-            if cg_code == "RT" and asi_result.get("rt"):
-                designation_text = rt_designation(asi_result["rt"]) or designation_text
-            
+            # Simpan kerja supaya menukar Category tidak perlu muat naik semula
+            st.session_state["job"] = {"pdf_text": pdf_text, "file_names": file_names, "mpn": target_mpn,
+                                       "mpn_instruction": mpn_instruction, "auto_cat": category,
+                                       "raw": {category: raw}}
+            st.session_state["cat_choice"] = category   # lalai = keputusan AI
             progress_bar.progress(100, text="Done!")
             time.sleep(0.5)
-            status_box.caption("✅ Extraction complete")
-            
-            rekod_mpn = target_mpn.upper() if target_mpn else "General (No MPN)"
-            
-            render_summary(designation_text, manufacturer_text, cg_text, asi_result, target_mpn,
-                           rule_applies=(asi_result["label"] != "No rule"), na_text="No rule loaded")
-            
-            # --- DEFINISI KATEGORI ---
-            keys_top = ["Operating Temperature (Max) (°C)", "Operating Temperature (Min) (°C)", "Storage Temperature (Max) (°C)", "Storage Temperature (Min) (°C)"]
-            keys_library = ["Length (mm)", "Width (mm)", "Height (Max)", "Package Type (EIA)", "Pitch (Footprint) (mm)", "Number of Pins"]
-            keys_processability = ["Kind of Mounting", "Washability", "Varnishability", "St. Solder (Standard Solder)", "Alt. Solder (Alternate Solder)", "Rep. Solder (Repair Solder)", "ESS Suitable", "Max Reflow Cycle (cycles)", "Max Reflow Time (s)", "Max Reflow Temp (°C)"]
-            keys_techn = ["Resistance (Ohm)", "Tolerance (%)", "Voltage (V)", "Package Type", "Quantity", "Function", "Power Consumption (W)", "Temperature Coefficient", "Height (mm)", "Additional Information"]
-            keys_techn_rt = ["Attenuation (dB)", "Impedance (Ohm)", "Frequency Max (GHz)", "Power Consumption (W)", "Package Type", "Quantity", "Height (mm)", "Additional Information"]
-            keys_techn_active = keys_techn_rt if cg_code == "RT" else keys_techn
+            status_box.empty()
+        except Exception as e:
+            st.error(f"Error Happened!: {e}")
 
-            def build_table(keys_list, data_dict):
-                specs, values, units, evidences, pages = [], [], [], [], []
-                for key in keys_list:
-                    item = data_dict.get(key, {"value": "N/A", "evidence": "N/A", "page": "N/A"})
-                    if isinstance(item, str):
-                        val, ev, pg = item, "N/A", "N/A"
-                    else:
-                        val = item.get("value", "N/A")
-                        ev = item.get("evidence", "N/A")
-                        pg = item.get("page", "N/A")
-                        
-                    # Asingkan Unit
-                    unit_str = "-"
-                    if key == "Temperature Coefficient" and val != "N/A":
-                        if "ppm/°C" in val:
-                            val, unit_str = val.replace("ppm/°C", "").strip(), "ppm/°C"
-                        elif "ppm/K" in val:
-                            val, unit_str = val.replace("ppm/K", "").strip(), "ppm/K"
-                        elif "ppm/C" in val: 
-                            val, unit_str = val.replace("ppm/C", "").strip(), "ppm/°C"
-                            
-                    elif "(°C)" in key: key, unit_str = key.replace(" (°C)", ""), "°C"
-                    elif "(mm)" in key: key, unit_str = key.replace(" (mm)", ""), "mm"
-                    elif "(Ohm)" in key: key, unit_str = key.replace(" (Ohm)", ""), "Ohm"
-                    elif "(dB)" in key: key, unit_str = key.replace(" (dB)", ""), "dB"
-                    elif "(GHz)" in key: key, unit_str = key.replace(" (GHz)", ""), "GHz"
-                    elif "(%)" in key: key, unit_str = key.replace(" (%)", ""), "%"
-                    elif "(V)" in key: key, unit_str = key.replace(" (V)", ""), "V"
-                    elif "(W)" in key: key, unit_str = key.replace(" (W)", ""), "W"
-                    elif "(ppm/K)" in key: key, unit_str = key.replace(" (ppm/K)", ""), "ppm/K"
-                    elif "(s)" in key: key, unit_str = key.replace(" (s)", ""), "s"
-                    elif "(cycles)" in key: key, unit_str = key.replace(" (cycles)", ""), "cycles"
-                    
-                    specs.append(key)
-                    values.append(val)
-                    units.append(unit_str)
-                    evidences.append(ev)
-                    pages.append(pg)
-                    
-                return {"Specification": specs, "Extracted Value": values, "Unit": units, "Page": pages, "Source Evidence": evidences}
-
-            # --- 6 TABS UI (keputusan ASI dipaparkan dalam tab Top) ---
-            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Top", "Library", "Processability", "Techn.Parameter", "Alternative", "DMS Check"])
-            with tab1:
-                if asi_result["label"] == "No rule":
-                    st.warning(f"No standardization rule is loaded for {cg_code} yet, so no ASI was determined.")
-                left, right = st.columns([3, 2])
-                with left:
-                    st.subheader("ASI Result")
-                    render_asi(asi_result)
-                with right:
-                    st.subheader("Temperature")
-                    st.table(build_table(keys_top, extracted_data))
-            with tab2: st.table(build_table(keys_library, extracted_data))
-            with tab3: st.table(build_table(keys_processability, extracted_data))
-            with tab4: st.table(build_table(keys_techn_active, extracted_data))
-            with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result, dms_df, target_mpn, cg_code)
-            with tab6: render_duplicate_check(dms_df, target_mpn, extracted_data, designation_text, cg_code)
-            
-            # --- JANA FAIL EXCEL (CSV) ---
-            all_keys = keys_top + keys_library + keys_processability + keys_techn_active
-            all_data = build_table(all_keys, extracted_data)
-            
-            csv_buffer = io.StringIO()
-            csv_buffer.write('\ufeff') 
-            
-            writer = csv.writer(csv_buffer)
-            writer.writerow(["Specification", "Extracted Value", "Unit", "Page", "Source Evidence"]) 
-            
-            for i in range(len(all_data["Specification"])):
-                writer.writerow([all_data["Specification"][i], all_data["Extracted Value"][i], all_data["Unit"][i], all_data["Page"][i], all_data["Source Evidence"][i]])
-            
-            # Tambah keputusan ASI di hujung CSV
-            for row in asi_csv_rows(asi_result):
-                writer.writerow(row)
-            
-            st.divider()
-            st.download_button(
-                label="📥 Download Report (CSV)",
-                data=csv_buffer.getvalue(),
-                file_name=f"{rekod_mpn}_Report.csv",
-                mime="text/csv"
-            )
-            
+job = st.session_state.get("job")
+if job:
+    # --- DROPDOWN CATEGORY: lalai ikut AI, pengguna boleh tukar jika AI tersilap ---
+    c_cat, c_note = st.columns([2, 3], vertical_alignment="bottom")
+    with c_cat:
+        chosen = st.selectbox("Category", list(CATEGORIES), key="cat_choice")
+    with c_note:
+        if chosen == job["auto_cat"]:
+            st.caption(f"✅ Extraction complete · detected by AI: {job['auto_cat']}")
+        else:
+            st.caption(f"✏️ Manual choice · AI detected: {job['auto_cat']}")
+    
+    # ekstrak untuk Category yang dipilih hanya sekali (hasil disimpan)
+    if chosen not in job["raw"]:
+        holder = st.empty()
+        pb = holder.progress(0, text=f"Extracting as {chosen}...")
+        try:
+            new_raw = call_model(build_prompt(chosen, job["mpn_instruction"], job["pdf_text"]), pb)
+            if new_raw:
+                new_raw.pop("Category", None)
+                job["raw"][chosen] = new_raw
+        except Exception as e:
+            st.error(f"Error Happened!: {e}")
+        holder.empty()
+    
+    if chosen in job["raw"]:
+        try:
+            render_results(job, chosen, job["raw"][chosen], dms_df)
         except Exception as e:
             st.error(f"Error Happened!: {e}")
