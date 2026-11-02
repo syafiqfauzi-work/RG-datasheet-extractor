@@ -331,5 +331,5 @@ def render_asi(result):
         })
     for f in result["flags"]:
         callout("warning", f)
-    st.caption("Rule-based on the RG standardization rule (18 Jul 2024). "
-               "Confirm the official status in DMS/PDM (ASI-Reason).")
+    src = result.get("source", "the RG standardization rule (18 Jul 2024)")
+    st.caption(f"Rule-based on {src}. Confirm the official status in DMS/PDM (ASI-Reason).")

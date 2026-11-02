@@ -13,7 +13,7 @@ import re
 
 SOURCE = "PAD-M 3575.5490.00 Tab. 5.1-1"
 
-# commodity group -> (washability, varnishability); R* groups only
+# commodity group -> (washability, varnishability); R* and L* groups (obsolete groups left out)
 TABLE = {
     "RG": ("W", "L"),   # metal film / glaze / oxide / wire-wound / carbon, fixed
     "RN": ("W", "L"),   # resistor networks
@@ -23,6 +23,16 @@ TABLE = {
     "RS": ("K", "K"),   # non-wire-wound resistors
     "RX": ("N", "N"),   # unencapsulated chips
     "RZ": ("N", "N"),   # accessories for resistors
+    "LB": ("K", "K"),   # (no technology text in PAD-M)
+    "LD": ("K", "K"),   # chokes, coils, filters
+    "LF": ("K", "K"),   # ferrite core with accessories
+    "LK": ("K", "K"),   # carbonyl
+    "LL": ("K", "K"),   # air-core coils
+    "LM": ("N", "N"),   # CDs, DVDs, etc.
+    "LP": ("N", "N"),   # permanent magnets
+    "LT": ("K", "K"),   # mains transformers
+    "LU": ("K", "K"),   # carriers (DMS: transformer)
+    # LS (shielding can) is not in the PAD-M table -> DEFAULT (K / K, section 4.1.1)
 }
 DEFAULT = ("K", "K")    # section 4.1.1: new material = "K - workability unknown"
 

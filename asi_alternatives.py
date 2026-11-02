@@ -177,6 +177,10 @@ def render_alternatives(extracted_data, designation_text, manufacturer_text, asi
         from rules_rt import render_rt_alternatives
         render_rt_alternatives(asi_result, dms_df)
         return
+    if cg_code in ("LD", "LL"):
+        from rules_l import render_l_alternatives
+        render_l_alternatives(asi_result)
+        return
     if cg_code not in ("RG", "Unknown"):
         callout("info", f"Alternative suggestions are not available for {cg_code} yet (no standardization rule loaded).")
         return
