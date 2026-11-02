@@ -30,15 +30,59 @@ def _hits(words, text):
     return sum(len(re.findall(_rx(w), text, flags=re.I)) for w in words)
 
 
+# well-known inductor makers that are NOT on the AML: detected so the AI cannot swap them for an AML name
+OTHER_MANUFACTURERS = {
+    "Bourns Inc.": ["bourns"],
+    "Laird Technologies": ["laird"],
+    "Fair-Rite Products Corp.": ["fair-rite", "fair rite"],
+    "Taiyo Yuden Co., Ltd.": ["taiyo yuden"],
+    "Sumida Corporation": ["sumida"],
+    "Abracon LLC": ["abracon"],
+    "Eaton (Coiltronics)": ["coiltronics", "eaton"],
+    "Pulse Electronics": ["pulse electronics", "pulseelectronics"],
+    "KEMET Corporation": ["kemet"],
+    "Panasonic Corporation": ["panasonic"],
+    "Bel Fuse Inc.": ["bel fuse", "belfuse"],
+    "Chilisin Electronics": ["chilisin"],
+    "Samsung Electro-Mechanics": ["samsung electro-mechanics", "samsung electro mechanics"],
+    "Johanson Technology": ["johanson"],
+    "Kyocera AVX Components Ltd.": ["kyocera avx", "avx corporation"],
+    "Littelfuse, Inc.": ["littelfuse"],
+    "Schaffner": ["schaffner"],
+    "Schurter": ["schurter"],
+    "Parker Chomerics": ["chomerics"],
+    "Arnold Magnetic Technologies": ["arnold magnetic"],
+}
+
+
+def _mfr_score(words, names, head, text):
+    return 6 * _hits(words, names) + 3 * _hits(words, head) + min(_hits(words, text), 10)
+
+
 def detect_manufacturer_l(pdf_text, file_names=()):
-    """Canonical AML name, or None when the evidence is weak."""
+    """Canonical manufacturer name (AML name when on the AML), or None when the evidence is weak."""
     names, head = " ".join(file_names), pdf_text[:3000]
     best, best_score = None, 0
-    for canon, (words, _cgs) in AML.items():
-        sc = 6 * _hits(words, names) + 3 * _hits(words, head) + min(_hits(words, pdf_text), 10)
+    candidates = [(c, w) for c, (w, _cgs) in AML.items()] + list(OTHER_MANUFACTURERS.items())
+    for canon, words in candidates:
+        sc = _mfr_score(words, names, head, pdf_text)
         if sc > best_score:
             best, best_score = canon, sc
     return best if best_score >= 8 else None
+
+
+def resolve_manufacturer_l(ai_name, pdf_text, file_names=()):
+    """Strong text evidence wins. Otherwise keep the AI answer, but reject an AML name the datasheet never mentions
+    (the AI tends to pick a name from the list it was given)."""
+    found = detect_manufacturer_l(pdf_text, file_names)
+    if found:
+        return found
+    canon, _cgs = aml_entry(ai_name)
+    if canon:
+        words = AML[canon][0]
+        if _mfr_score(words, " ".join(file_names), pdf_text[:3000], pdf_text) == 0:
+            return "Unknown"
+    return ai_name
 
 
 def aml_entry(manufacturer):

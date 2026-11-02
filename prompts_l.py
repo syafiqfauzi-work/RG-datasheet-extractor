@@ -17,8 +17,9 @@ MANUFACTURER_RULE = (
     '            - FOR "Manufacturer": Identify the manufacturer of the component from the datasheet. If it is one of '
     "these, return the name exactly as written: "
     + ", ".join(f'"{n}"' for n in AML)
-    + ". TDK and EPCOS are both \"TDK Corporation\". If the manufacturer is not in this list, return its company "
-    "name as printed in the datasheet.")
+    + ". TDK and EPCOS are both \"TDK Corporation\". Choose a name from this list ONLY if that company name is "
+    "printed in the datasheet. If the manufacturer is not in this list (e.g., Bourns, Laird, Sumida), return its "
+    "company name exactly as printed in the datasheet - never substitute a listed name.")
 
 COMMON_L_RULES = '''
             [L* COMMON RULES]

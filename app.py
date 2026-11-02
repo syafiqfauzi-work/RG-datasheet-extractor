@@ -22,7 +22,7 @@ from rules_rt import rt_designation
 from categories import CATEGORIES, RESISTOR
 from commodities import COMMODITIES, ALL_CATEGORIES, build_prompt_any, detect_commodity
 from categories_l import CATEGORIES_L, snap_pick_lists
-from rules_l import detect_manufacturer_l, determine_cg_l, cg_label
+from rules_l import resolve_manufacturer_l, determine_cg_l, cg_label
 from processability import apply_processability
 
 # --- 1. SETTING TAJUK WEB ---
@@ -192,7 +192,7 @@ def render_results(job, category, raw, dms_df):
     # Penapis tegas: nama fail / kandungan PDF mengatasi jawapan AI jika bukti kuat
     is_l = category in CATEGORIES_L
     if is_l:
-        manufacturer_text = detect_manufacturer_l(pdf_text, file_names) or manufacturer_text
+        manufacturer_text = resolve_manufacturer_l(manufacturer_text, pdf_text, file_names)
         snap_pick_lists(category, extracted_data)   # jawapan AI -> nilai tepat senarai DMS
     else:
         manufacturer_text = detect_manufacturer(pdf_text, file_names) or manufacturer_text
