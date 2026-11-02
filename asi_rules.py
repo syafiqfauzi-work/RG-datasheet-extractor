@@ -323,12 +323,13 @@ def render_asi(result):
     callout(kind, result["summary"], tag=result["label"])
     st.caption(f"Sub-group: {result['subgroup']}")
     if result["checks"]:
-        st.table({
+        from ui_style import md_safe
+        st.table(md_safe({
             "Parameter": [c["Parameter"] for c in result["checks"]],
             "Value": [str(c["Value"]) for c in result["checks"]],
             "Rating": [LABEL.get(c["Rating"], "info") for c in result["checks"]],
             "Note": [c["Note"] for c in result["checks"]],
-        })
+        }))
     for f in result["flags"]:
         callout("warning", f)
     src = result.get("source", "the RG standardization rule (18 Jul 2024)")

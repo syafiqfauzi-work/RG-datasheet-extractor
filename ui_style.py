@@ -145,6 +145,17 @@ header[data-testid="stHeader"] button, header[data-testid="stHeader"] svg {color
 .stApp button[data-baseweb="tab"][aria-selected="true"] p {color: #fafafa !important;}
 .stApp [data-baseweb="tab-border"] {background: rgba(250,250,250,0.14) !important;}
 
+/* uploaded file chip */
+.stApp [data-testid="stFileChip"], [data-testid="stSidebar"] [data-testid="stFileChip"] {
+    background: #262b36 !important; border-color: rgba(250,250,250,0.18) !important;}
+.stApp [data-testid="stFileChip"] *, [data-testid="stSidebar"] [data-testid="stFileChip"] * {color: #fafafa !important;}
+
+/* lines: table rows, table frame, tab separator */
+.stApp [data-testid="stTable"] div {border-color: rgba(250,250,250,0.16) !important;}
+.stApp [data-testid="stTable"] th {border-bottom: 1px solid rgba(250,250,250,0.35) !important;}
+.stApp [data-testid="stTable"] td {border-bottom: 1px solid rgba(250,250,250,0.14) !important;}
+.stApp [role="tablist"]::after {background-color: rgba(250,250,250,0.2) !important;}
+
 /* keep coloured accents readable */
 .callout-tag {color: #ffffff !important;}
 .update-pill {border-color: rgba(250,250,250,0.25) !important;}
@@ -166,6 +177,16 @@ def callout(kind, text, tag=None):
     import streamlit as st
     pill = f'<span class="callout-tag">{html.escape(str(tag))}</span>' if tag else ""
     st.markdown(f'<p class="callout callout-{kind}">{pill}<span>{_inline(text)}</span></p>', unsafe_allow_html=True)
+
+
+def _md_cell(v):
+    s = str(v).replace("*", "\\*")
+    return "\\" + s if s[:1] in ("-", "+", "#", ">") else s   # '-' alone would become a bullet
+
+
+def md_safe(table):
+    """st.table renders Markdown: escape it so DMS codes like *RADIAL*, EIA0402* or '-' show as written."""
+    return {k: [_md_cell(v) for v in vals] for k, vals in table.items()}
 
 
 def apply_style(dark=False):

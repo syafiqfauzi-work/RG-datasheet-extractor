@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from asi_rules import render_asi, asi_csv_rows
 from asi_alternatives import render_alternatives
 from dms_lookup import dms_sidebar, render_duplicate_check
-from ui_style import apply_style, render_summary, callout
+from ui_style import apply_style, render_summary, callout, md_safe
 from extract_rules import detect_manufacturer, detect_commodity_group, quantity_from
 from rules_registry import determine_asi_for_cg
 from rules_rt import rt_designation
@@ -427,13 +427,13 @@ def render_results(job, category, raw, dms_df):
             render_asi(asi_result)
         with right:
             st.subheader("Temperature")
-            st.table(build_table(keys_top, extracted_data))
-    with tab2: st.table(build_table(keys_library, extracted_data))
+            st.table(md_safe(build_table(keys_top, extracted_data)))
+    with tab2: st.table(md_safe(build_table(keys_library, extracted_data)))
     with tab3:
-        st.table(build_table(keys_processability, extracted_data))
+        st.table(md_safe(build_table(keys_processability, extracted_data)))
         for w in proc_warnings:
             callout("warning", w)
-    with tab4: st.table(build_table(keys_techn_active, extracted_data))
+    with tab4: st.table(md_safe(build_table(keys_techn_active, extracted_data)))
     with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result, dms_df, target_mpn, cg_code)
     if not is_l:
         with tabs[5]: render_duplicate_check(dms_df, target_mpn, extracted_data, designation_text, cg_code)
