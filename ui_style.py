@@ -51,6 +51,11 @@ div[data-testid="stMarkdownContainer"] p.field-label {font-size: 0.875rem; line-
 /* --- status text beside the Category box: as tall as the box, text centred --- */
 div[data-testid="stMarkdownContainer"] p.status-line {display: flex; align-items: center; height: 2.5rem; font-size: 0.875rem; opacity: 0.7;}
 
+/* --- header: small caps label beside the commodity selector --- */
+.hdr-label {font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.6;}
+div[data-testid="stMarkdownContainer"]:has(.hdr-label), div[data-testid="stMarkdownContainer"]:has(.update-pill) {margin-bottom: 0 !important;}
+div[data-testid="stMarkdownContainer"]:has(.hdr-label) p, div[data-testid="stMarkdownContainer"]:has(.update-pill) p {margin: 0 !important;}
+
 /* --- last-update pill, top right --- */
 div[data-testid="stMarkdownContainer"] p.update-wrap {text-align: right;}
 .update-pill {display: inline-block; padding: 0.25rem 0.75rem; border: 1px solid rgba(128,128,128,0.3);
@@ -85,6 +90,67 @@ div[data-testid="stMarkdownContainer"] p.callout-success {border-left-color: #16
 </style>
 """
 
+# dark mode: overrides on top of the light theme (switch in the header, kept in the URL as ?dark=true)
+DARK_CSS = """
+<style>
+:root {color-scheme: dark;}
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stBottomBlockContainer"] {background: #0e1117 !important;}
+header[data-testid="stHeader"] {background: transparent !important;}
+header[data-testid="stHeader"] button, header[data-testid="stHeader"] svg {color: #fafafa !important;}
+[data-testid="stSidebar"], [data-testid="stSidebarContent"] {background: #161a22 !important;}
+
+/* text */
+.stApp, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp p, .stApp li, .stApp label, .stApp td, .stApp th,
+.stApp small, .stApp [data-testid="stMarkdownContainer"], .stApp [data-testid="stWidgetLabel"] *,
+[data-testid="stSidebar"] p, [data-testid="stSidebar"] label, [data-testid="stSidebar"] span, [data-testid="stSidebar"] small {color: #fafafa !important;}
+.stApp hr {border-color: rgba(250,250,250,0.14) !important;}
+
+/* inputs and dropdowns */
+.stApp [data-baseweb="input"], .stApp [data-baseweb="select"] > div, [data-testid="stSidebar"] [data-baseweb="select"] > div {
+    background-color: #1a1d24 !important; border: 1px solid rgba(250,250,250,0.18) !important;}
+.stApp [data-testid="stTextInputRootElement"], .stApp [data-testid="stSelectbox"] div:has(> input),
+[data-testid="stSidebar"] [data-testid="stTextInputRootElement"], [data-testid="stSidebar"] [data-testid="stSelectbox"] div:has(> input) {
+    background-color: #1a1d24 !important; border-color: rgba(250,250,250,0.18) !important;}
+.stApp [data-baseweb="base-input"], .stApp input, .stApp textarea, .stApp [data-baseweb="select"] div {
+    background-color: #1a1d24 !important; color: #fafafa !important;}
+.stApp [data-baseweb="select"] *, [data-testid="stSidebar"] [data-baseweb="select"] * {color: #fafafa !important;}
+[data-baseweb="popover"] ul, [data-baseweb="popover"] [role="listbox"], [data-baseweb="menu"] {background: #1a1d24 !important;}
+[data-baseweb="popover"] li, [data-baseweb="popover"] [role="option"] {background: #1a1d24 !important; color: #fafafa !important;}
+[data-baseweb="popover"] li:hover, [data-baseweb="popover"] [aria-selected="true"] {background: #262b36 !important;}
+[data-testid="stSelectboxVirtualDropdown"] {background: #1a1d24 !important; border-color: rgba(250,250,250,0.18) !important;}
+[data-testid="stSelectboxVirtualDropdown"] [role="option"], [data-testid="stSelectboxVirtualDropdown"] [role="option"] * {color: #fafafa !important;}
+[data-testid="stSelectboxVirtualDropdown"] [role="option"]:hover, [data-testid="stSelectboxVirtualDropdown"] [aria-selected="true"] {background: #262b36 !important;}
+
+/* file uploader */
+[data-testid="stFileUploaderDropzone"] {background: #1a1d24 !important; border: 1px dashed rgba(250,250,250,0.22) !important;}
+[data-testid="stFileUploaderDropzone"] *, [data-testid="stFileUploaderFile"] * {color: #fafafa !important;}
+
+/* secondary buttons (Browse files, Download, segmented control) */
+.stApp [data-testid="stBaseButton-secondary"], [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"],
+.stApp [data-testid="stButtonGroup"] button[aria-checked] {
+    background: #1a1d24 !important; color: #fafafa !important; border-color: rgba(250,250,250,0.2) !important;}
+.stApp [data-testid="stBaseButton-secondary"]:hover, .stApp [data-testid="stButtonGroup"] button[aria-checked]:hover {
+    border-color: #3b82f6 !important;}
+.stApp [data-testid="stButtonGroup"] button[aria-checked="true"] {
+    background: rgba(37,99,235,0.28) !important; border-color: #3b82f6 !important;}
+.stApp [data-testid="stButtonGroup"] button[aria-checked="true"] p {color: #bfdbfe !important;}
+/* Reset stays red */
+.stApp .st-key-reset_btn button {background: #dc2626 !important; border-color: #dc2626 !important;}
+.stApp .st-key-reset_btn button:hover {background: #b91c1c !important; border-color: #b91c1c !important;}
+.stApp .st-key-reset_btn button p {color: #ffffff !important;}
+
+/* code box (designation), tabs */
+.stApp [data-testid="stCode"] pre, .stApp [data-testid="stCode"] code {background: #1a1d24 !important; color: #fafafa !important;}
+.stApp button[data-baseweb="tab"] p {color: rgba(250,250,250,0.65) !important;}
+.stApp button[data-baseweb="tab"][aria-selected="true"] p {color: #fafafa !important;}
+.stApp [data-baseweb="tab-border"] {background: rgba(250,250,250,0.14) !important;}
+
+/* keep coloured accents readable */
+.callout-tag {color: #ffffff !important;}
+.update-pill {border-color: rgba(250,250,250,0.25) !important;}
+</style>
+"""
+
 ASI_TEXT = {0: ("T", "Recommended", "#16a34a"), 1: ("O", "Approved", "#d97706"),
             2: ("U/V", "Avoid for new designs", "#dc2626")}
 
@@ -102,9 +168,9 @@ def callout(kind, text, tag=None):
     st.markdown(f'<p class="callout callout-{kind}">{pill}<span>{_inline(text)}</span></p>', unsafe_allow_html=True)
 
 
-def apply_style():
+def apply_style(dark=False):
     import streamlit as st
-    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(CSS + (DARK_CSS if dark else ""), unsafe_allow_html=True)
 
 
 def _kv(label, value, color=None):

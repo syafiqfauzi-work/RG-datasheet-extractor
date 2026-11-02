@@ -27,7 +27,9 @@ from processability import apply_processability
 
 # --- 1. SETTING TAJUK WEB ---
 st.set_page_config(page_title="Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
-apply_style()
+# mod gelap: nilai suis (disimpan dalam URL ?dark=true supaya kekal bila buka semula / bookmark)
+DARK = st.session_state.get("dark", str(st.query_params.get("dark", "")).lower() in ("true", "1"))
+apply_style(dark=DARK)
 
 # --- TARIKH KEMASKINI KOD (dari commit GitHub terakhir) ---
 GITHUB_REPO = "syafiqfauzi-work/RG-datasheet-extractor"
@@ -72,17 +74,22 @@ def effective_commodity():
     job_ = st.session_state.get("job")
     return manual or (job_["auto_commodity"] if job_ else None)
 
-# --- TAJUK (kiri) + COMMODITY + TARIKH KEMASKINI (kanan atas) ---
-c_title, c_com, c_upd = st.columns([4, 3, 2], vertical_alignment="bottom")
-with c_title:
+# --- HEADER: kiri = tajuk + kapsyen | kanan = (mod gelap + tarikh kemaskini) di atas, commodity di bawah ---
+h_left, h_right = st.columns(2, vertical_alignment="center")
+with h_left:
     st.title("Datasheet Analyzer")
     st.caption("Upload a datasheet (PDF) and the AI will extract the key specifications.")
-with c_com:
-    st.radio("Commodity", list(COMMODITY_OPTIONS), key="commodity_choice", horizontal=True,
-             help="Auto-detect reads the datasheet. Pick R* or L* to override it.")
-with c_upd:
-    st.markdown(f'<p class="update-wrap"><span class="update-pill">🕒 Last update: {get_last_update()} SGT</span></p>',
-                unsafe_allow_html=True)
+with h_right:
+    with st.container(horizontal=True, horizontal_alignment="right", vertical_alignment="center", gap="medium"):
+        st.toggle(":material/dark_mode: Dark mode", key="dark", bind="query-params")
+        st.markdown(f'<span class="update-pill">🕒 Last update: {get_last_update()} SGT</span>',
+                    unsafe_allow_html=True, width="content")
+    with st.container(horizontal=True, horizontal_alignment="right", vertical_alignment="center", gap="small"):
+        st.markdown('<span class="hdr-label">Commodity</span>', unsafe_allow_html=True, width="content")
+        st.segmented_control("Commodity", list(COMMODITY_OPTIONS), key="commodity_choice", required=True,
+                             label_visibility="collapsed",
+                             help="Auto-detect reads the datasheet. Pick R* or L* to override it.")
+st.divider()
 
 # --- PANGGILAN MODEL AI (dengan retry) ---
 def call_model(full_prompt, progress_bar):
