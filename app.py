@@ -26,7 +26,7 @@ from rules_l import detect_manufacturer_l, determine_cg_l, cg_label
 from processability import apply_processability
 
 # --- 1. SETTING TAJUK WEB ---
-st.set_page_config(page_title="R* / L* Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Datasheet Analyzer", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
 apply_style()
 
 # --- TARIKH KEMASKINI KOD (dari commit GitHub terakhir) ---
@@ -75,7 +75,7 @@ def effective_commodity():
 # --- TAJUK (kiri) + COMMODITY + TARIKH KEMASKINI (kanan atas) ---
 c_title, c_com, c_upd = st.columns([4, 3, 2], vertical_alignment="bottom")
 with c_title:
-    st.title(f"{effective_commodity() or 'R* / L*'} Datasheet Analyzer")
+    st.title("Datasheet Analyzer")
     st.caption("Upload a datasheet (PDF) and the AI will extract the key specifications.")
 with c_com:
     st.radio("Commodity", list(COMMODITY_OPTIONS), key="commodity_choice", horizontal=True,
