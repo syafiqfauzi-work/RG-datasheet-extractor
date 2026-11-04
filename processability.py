@@ -36,6 +36,31 @@ TABLE = {
 }
 DEFAULT = ("K", "K")    # section 4.1.1: new material = "K - workability unknown"
 
+# C* groups (same PAD-M table, as used by the former C* analyzer): fixed codes ...
+C_FIXED = {"CB": ("K", "K"), "CH": ("K", "K"), "CM": ("K", "K"), "CN": ("K", "K"), "CP": ("K", "K"),
+           "CS": ("K", "K"), "CV": ("K", "K"), "CD": ("N", "N"), "CL": ("N", "N")}
+
+
+def c_codes(cg_code, ed):
+    """... and groups whose code depends on the construction. Returns (wash, varn, reason) or None."""
+    smd = _val(ed, "Kind of Mounting").upper().startswith("SMT")
+    yes = lambda k: _val(ed, k).lower() in ("yes", "y")
+    no = lambda k: _val(ed, k).lower() in ("no", "n")
+    if cg_code in C_FIXED:
+        return (*C_FIXED[cg_code], f"{cg_code}")
+    if cg_code == "CC":
+        return ("W", "L", "CC SMD") if smd else ("K", "K", "CC non-SMD")
+    if cg_code == "CE":
+        return (("W", "L", "CE without insulating cover / sleeve") if no("Insulating Sleeve")
+                else ("K", "K", "CE with insulating sleeve (or not stated)"))
+    if cg_code == "CG":
+        return ("K", "K", "CG SMD") if smd else ("W", "L", "CG leaded")
+    if cg_code == "CK":
+        return ("W", "L", "CK SMD with coating") if smd and yes("Coated") else ("K", "K", "CK other")
+    if cg_code == "CT":
+        return ("K", "K", "CT with sealing disk") if yes("Sealing Disk") else ("N", "N", "CT without sealing disk")
+    return None
+
 WASH_MEANING = {
     "W": "Approved: no R&S test (PAD specs / manufacturer info), cleaning agent Vigon SC202, standard drying",
     "O": "Approved: no R&S test, Vigon SC202, FA+ incompatible, standard drying",
@@ -226,6 +251,10 @@ def apply_processability(extracted_data, cg_code, mpn="", designation=""):
     wash, varn = TABLE.get(cg_code, DEFAULT)
     src = (f"{SOURCE}: {cg_code} = {wash} / {varn}" if listed
            else f"PAD-M 3575.5490.00 4.1.1: group {cg_code} not in the table, default K / K")
+    c_rule = c_codes(cg_code, extracted_data) if str(cg_code).startswith("C") else None
+    if c_rule:
+        wash, varn, why = c_rule
+        src = f"{SOURCE}: {why} = {wash} / {varn}"
     warnings = []
 
     for key, letter, meaning, approved, bad_word in (

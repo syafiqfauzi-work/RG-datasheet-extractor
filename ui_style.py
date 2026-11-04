@@ -162,7 +162,7 @@ header[data-testid="stHeader"] button, header[data-testid="stHeader"] svg {color
 </style>
 """
 
-ASI_TEXT = {0: ("T", "Recommended", "#16a34a"), 1: ("O", "Approved", "#d97706"),
+ASI_TEXT = {0: ("T", "Recommended", "#16a34a"), 1: ("O", "Approved", "#d97706"), 1.5: ("B", "Conditional use", "#ea580c"),
             2: ("U/V", "Avoid for new designs", "#dc2626")}
 
 

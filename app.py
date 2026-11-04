@@ -23,6 +23,8 @@ from categories import CATEGORIES, RESISTOR
 from commodities import COMMODITIES, ALL_CATEGORIES, build_prompt_any, detect_commodity
 from categories_l import CATEGORIES_L, snap_pick_lists
 from rules_l import resolve_manufacturer_l, determine_cg_l, cg_label
+from categories_c import snap_pick_lists_c
+from rules_c import resolve_manufacturer_c, determine_cg_c, cg_label_c, clean_designation_c
 from processability import apply_processability
 
 # --- 1. SETTING TAJUK WEB ---
@@ -63,8 +65,8 @@ def get_last_update():
     # 3) fallback: masa fail diubah
     return datetime.fromtimestamp(os.path.getmtime(__file__), timezone(timedelta(hours=8))).strftime("%d/%m/%Y %H:%M")
 
-# --- COMMODITY: Auto-detect (lalai) atau pilihan manual R* / L* ---
-COMMODITY_OPTIONS = {"Auto-detect": None, "R* Resistor": "R*", "L* Inductor": "L*"}
+# --- COMMODITY: Auto-detect (lalai) atau pilihan manual R* / L* / C* ---
+COMMODITY_OPTIONS = {"Auto-detect": None, "R* Resistor": "R*", "L* Inductor": "L*", "C* Capacitor": "C*"}
 if "commodity_choice" not in st.session_state:
     st.session_state.commodity_choice = "Auto-detect"
 
@@ -88,7 +90,7 @@ with h_right:
         st.markdown('<span class="hdr-label">Commodity</span>', unsafe_allow_html=True, width="content")
         st.segmented_control("Commodity", list(COMMODITY_OPTIONS), key="commodity_choice", required=True,
                              label_visibility="collapsed",
-                             help="Auto-detect reads the datasheet. Pick R* or L* to override it.")
+                             help="Auto-detect reads the datasheet. Pick R*, L* or C* to override it.")
 st.divider()
 
 # --- PANGGILAN MODEL AI (dengan retry) ---
@@ -176,7 +178,7 @@ def read_pdfs(uploaded_file, spec_file, progress_bar):
     return pdf_text
 
 # --- PAPAR KEPUTUSAN IKUT CATEGORY ---
-def render_results(job, category, raw, dms_df):
+def render_results(job, com, category, raw, dms_df):
     pdf_text, file_names, target_mpn = job["pdf_text"], job["file_names"], job["mpn"]
     extracted_data = copy.deepcopy(raw)
     # Asingkan Designation
@@ -190,10 +192,15 @@ def render_results(job, category, raw, dms_df):
     if isinstance(manufacturer_text, dict): 
         manufacturer_text = manufacturer_text.get("value", "Unknown")
     # Penapis tegas: nama fail / kandungan PDF mengatasi jawapan AI jika bukti kuat
-    is_l = category in CATEGORIES_L
+    is_l = com == "L*"
+    is_c = com == "C*"
     if is_l:
         manufacturer_text = resolve_manufacturer_l(manufacturer_text, pdf_text, file_names)
         snap_pick_lists(category, extracted_data)   # jawapan AI -> nilai tepat senarai DMS
+    elif is_c:
+        manufacturer_text = resolve_manufacturer_c(manufacturer_text, pdf_text, file_names)
+        snap_pick_lists_c(category, extracted_data)
+        designation_text = clean_designation_c(designation_text)
     else:
         manufacturer_text = detect_manufacturer(pdf_text, file_names) or manufacturer_text
     # -----------------------------
@@ -222,6 +229,9 @@ def render_results(job, category, raw, dms_df):
     elif is_l:
         cg_code, cg_ev = determine_cg_l(category, extracted_data, pdf_text, manufacturer_text)
         cg_text = cg_label(cg_code)
+    elif is_c:
+        cg_code, cg_ev = determine_cg_c(category, extracted_data, pdf_text)
+        cg_text = cg_label_c(cg_code)
     else:
         cg_code = CATEGORIES[category]["cg"]
         cg_text = f"{cg_code} · {category}"
@@ -348,10 +358,11 @@ def render_results(job, category, raw, dms_df):
     proc_warnings = apply_processability(extracted_data, cg_code, mpn=target_mpn, designation=designation_text)
     
     # --- ASI DETERMINATION (peraturan ikut Commodity Group; guna nilai akhir selepas semua override) ---
-    asi_result = determine_asi_for_cg(cg_code, extracted_data, designation_text, manufacturer_text, pdf_text, file_names, category)
+    asi_result = determine_asi_for_cg(cg_code, extracted_data, designation_text, manufacturer_text, pdf_text,
+                                      file_names, category, mpn=target_mpn)
     if category == "RF Attenuator" and asi_result.get("rt"):
         designation_text = rt_designation(asi_result["rt"]) or "N/A"
-    elif category != RESISTOR:
+    elif category != RESISTOR and not is_c:   # C*: designation format of the former C* analyzer
         designation_text = "N/A"   # format designation hanya ditakrif untuk Resistor constant (dan RF Attenuator)
             
             
@@ -407,6 +418,7 @@ def render_results(job, category, raw, dms_df):
             elif "(ppm/K)" in key: key, unit_str = key.replace(" (ppm/K)", ""), "ppm/K"
             elif "(s)" in key: key, unit_str = key.replace(" (s)", ""), "s"
             elif "(cycles)" in key: key, unit_str = key.replace(" (cycles)", ""), "cycles"
+            elif "(h/°C)" in key: key, unit_str = key.replace(" (h/°C)", ""), "h/°C"
                     
             specs.append(key)
             values.append(val)
@@ -416,8 +428,8 @@ def render_results(job, category, raw, dms_df):
                     
         return {"Specification": specs, "Extracted Value": values, "Unit": units, "Page": pages, "Source Evidence": evidences}
 
-    # --- TABS UI (keputusan ASI dipaparkan dalam tab Top); L* tiada DMS Check (semak manual dalam DMS) ---
-    tab_names = ["Top", "Library", "Processability", "Techn.Parameter", "Alternative"] + ([] if is_l else ["DMS Check"])
+    # --- TABS UI (keputusan ASI dipaparkan dalam tab Top); L* / C* tiada DMS Check (semak manual dalam DMS) ---
+    tab_names = ["Top", "Library", "Processability", "Techn.Parameter", "Alternative"] + ([] if is_l or is_c else ["DMS Check"])
     tabs = st.tabs(tab_names)
     tab1, tab2, tab3, tab4, tab5 = tabs[:5]
     with tab1:
@@ -435,7 +447,7 @@ def render_results(job, category, raw, dms_df):
             callout("warning", w)
     with tab4: st.table(md_safe(build_table(keys_techn_active, extracted_data)))
     with tab5: render_alternatives(extracted_data, designation_text, manufacturer_text, asi_result, dms_df, target_mpn, cg_code)
-    if not is_l:
+    if not (is_l or is_c):
         with tabs[5]: render_duplicate_check(dms_df, target_mpn, extracted_data, designation_text, cg_code)
             
     # --- JANA FAIL EXCEL (CSV) ---
@@ -508,7 +520,7 @@ if uploaded_file is not None or spec_file is not None:
             category, cat_confident = COMMODITIES[com]["detect"](pdf_text, file_names)
             
             progress_bar.progress(40, text=f"Analyzing datasheet using AI ({com} · {category})... This may take a minute.")
-            raw = call_model(build_prompt_any(category, mpn_instruction, pdf_text), progress_bar)
+            raw = call_model(build_prompt_any(category, mpn_instruction, pdf_text, com), progress_bar)
             if not raw:
                 st.stop()
             
@@ -522,7 +534,7 @@ if uploaded_file is not None or spec_file is not None:
                 if ai_cat in cats and ai_cat != category:
                     progress_bar.progress(60, text=f"Category looks like {ai_cat}: extracting again...")
                     category = ai_cat
-                    raw = call_model(build_prompt_any(category, mpn_instruction, pdf_text), progress_bar)
+                    raw = call_model(build_prompt_any(category, mpn_instruction, pdf_text, com), progress_bar)
                     if not raw:
                         st.stop()
             raw.pop("Category", None)
@@ -530,7 +542,7 @@ if uploaded_file is not None or spec_file is not None:
             # Simpan kerja supaya menukar Commodity / Category tidak perlu muat naik semula
             st.session_state["job"] = {"pdf_text": pdf_text, "file_names": file_names, "mpn": target_mpn,
                                        "mpn_instruction": mpn_instruction, "auto_commodity": auto_com,
-                                       "auto_cat": {com: category}, "raw": {category: raw}}
+                                       "auto_cat": {com: category}, "raw": {f"{com}|{category}": raw}}
             st.session_state[f"cat_choice_{com}"] = category   # lalai = keputusan AI
             progress_bar.progress(100, text="Done!")
             time.sleep(0.5)
@@ -565,21 +577,22 @@ if job:
                 else f"✏️ Manual category · {com_txt} · detected: {ai}")
         st.markdown(f'<p class="status-line">{text}</p>', unsafe_allow_html=True)
     
-    # ekstrak untuk Category yang dipilih hanya sekali (hasil disimpan)
-    if chosen not in job["raw"]:
+    # ekstrak untuk Category yang dipilih hanya sekali (hasil disimpan, ikut commodity + category)
+    raw_key = f"{com}|{chosen}"
+    if raw_key not in job["raw"]:
         holder = st.empty()
         pb = holder.progress(0, text=f"Extracting as {chosen}...")
         try:
-            new_raw = call_model(build_prompt_any(chosen, job["mpn_instruction"], job["pdf_text"]), pb)
+            new_raw = call_model(build_prompt_any(chosen, job["mpn_instruction"], job["pdf_text"], com), pb)
             if new_raw:
                 new_raw.pop("Category", None)
-                job["raw"][chosen] = new_raw
+                job["raw"][raw_key] = new_raw
         except Exception as e:
             st.error(f"Error Happened!: {e}")
         holder.empty()
     
-    if chosen in job["raw"]:
+    if raw_key in job["raw"]:
         try:
-            render_results(job, chosen, job["raw"][chosen], dms_df)
+            render_results(job, com, chosen, job["raw"][raw_key], dms_df)
         except Exception as e:
             st.error(f"Error Happened!: {e}")

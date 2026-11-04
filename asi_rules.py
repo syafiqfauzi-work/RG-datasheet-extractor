@@ -15,7 +15,8 @@ edits here, not in app.py.
 import re
 
 T, O, U = 0, 1, 2
-LABEL = {T: "ASI-T", O: "ASI-O", U: "ASI-U/V"}
+B = 1.5   # conditional use (CC rule): between approved and phase-out
+LABEL = {T: "ASI-T", O: "ASI-O", B: "ASI-B", U: "ASI-U/V"}
 
 # ---------------------------------------------------------------- suppliers
 PREFERRED = ("YAGEO",)
@@ -319,7 +320,7 @@ def asi_csv_rows(result):
 def render_asi(result):
     import streamlit as st
     from ui_style import callout
-    kind = {T: "success", O: "warning", U: "error"}.get(result["overall"], "info")
+    kind = {T: "success", O: "warning", B: "warning", U: "error"}.get(result["overall"], "info")
     callout(kind, result["summary"], tag=result["label"])
     st.caption(f"Sub-group: {result['subgroup']}")
     if result["checks"]:
