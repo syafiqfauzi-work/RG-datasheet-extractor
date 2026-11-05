@@ -124,6 +124,17 @@ header[data-testid="stHeader"] button, header[data-testid="stHeader"] svg {color
 /* file uploader */
 [data-testid="stFileUploaderDropzone"] {background: #1a1d24 !important; border: 1px dashed rgba(250,250,250,0.22) !important;}
 [data-testid="stFileUploaderDropzone"] *, [data-testid="stFileUploaderFile"] * {color: #fafafa !important;}
+/* the light base theme paints a white highlight inside the box on hover / drag-over:
+   keep everything inside transparent so the white text stays readable */
+[data-testid="stFileUploaderDropzone"]:hover, [data-testid="stFileUploaderDropzone"]:focus-within {
+    background: #20242d !important; border-color: #3b82f6 !important;}
+[data-testid="stFileUploaderDropzone"] *, [data-testid="stFileUploaderDropzone"] *:hover {
+    background-color: transparent !important; box-shadow: none !important;}
+/* Browse files button inside the box (re-applied after the transparent reset above) */
+.stApp [data-testid="stFileUploaderDropzone"] button {
+    background: #1a1d24 !important; color: #fafafa !important; border: 1px solid rgba(250,250,250,0.2) !important;}
+.stApp [data-testid="stFileUploaderDropzone"] button:hover {
+    background: #262b36 !important; border-color: #3b82f6 !important;}
 
 /* secondary buttons (Browse files, Download, segmented control) */
 .stApp [data-testid="stBaseButton-secondary"], [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"],
